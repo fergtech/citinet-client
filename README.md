@@ -1,236 +1,171 @@
 
-# Citinet Client (Windows-first MVP)
+# Citinet
 
-**Digital infrastructure for hyperlocal communities — owned by neighbors, not corporations.**
+**People-powered cloud — digital infrastructure owned by neighbors, not corporations.**
 
----
-
-## Current MVP Status (Phase 1)
-
-This is a **working prototype** focused on core functionality:
-
-### ✅ Fully Functional
-- **Installation Wizard** - First-run setup with node type selection (Hub/Client/Personal)
-- **Resource Allocation** - Configure storage, bandwidth, and CPU contribution limits
-- **System Monitoring** - Real-time CPU, memory, disk, and network metrics
-- **File Storage** - Upload, download, delete files with quota enforcement
-- **Cloudflare Tunnel** - Configure and manage public HTTPS access to Hub nodes
-- **Docker Management** - Monitor and control Docker containers
-- **Settings Panel** - Adjust resource limits, themes, and view hardware info
-
-### 🚧 Coming Later
-- Network discovery (mDNS infrastructure ready)
-- Community features and social networking
-- Peer-to-peer file sharing
-- Marketplace and local services
+Citinet (Citizens' Inter-networking) lets a community run its own cloud. A hub admin installs this desktop app, allocates storage, and optionally connects a Cloudflare Tunnel so members can access their hub from anywhere — similar to how Jellyfin + Cloudflare Tunnel works, but for community file storage and services.
 
 ---
 
-## What is Citinet?
-Citinet (Citizens' Inter‑networking) is a local‑first, community‑owned network made of **independently operated nodes** that interconnect using open standards. Each node is run by a household, a small business, a library, a school, or a neighborhood group. Together they form **a network of citizen‑owned networks**.
+## How It Works
 
-Citinet does **not** replace the physical Internet. It replaces the *centralized platform model* that currently dominates it by giving communities the tooling to run their **own cloud**: identity, storage, feeds, messaging, marketplace, and discovery — all locally controlled and privacy‑respecting.
+```
+Hub Admin installs Citinet desktop app
+  → 10-step wizard configures the node
+  → Embedded HTTP API starts on port 9090
+  → (Optional) Cloudflare Tunnel exposes the hub publicly
+  → Community members access via web app or desktop login
+```
 
----
-
-## Current MVP Architecture (2026)
-This repository contains the **Citinet Client** — a Tauri + React desktop application that acts as the universal installer, dashboard, and sync engine for Citinet.
-
-- **Windows‑first** (Windows 10/11). Linux/macOS and mobile will follow.
-- **One installer → three roles:**
-  - **Hub** – community micro–data center (runs services & DB in containers).
-  - **Client** – participant device (lightweight, optional contribution of storage/compute).
-  - **Personal** – sovereign device (user’s primary store, with optional sync to a home node).
-- **Ingress**: Hubs use **Cloudflare Tunnel** (managed by the client) to expose `https://{node}.citinet.io` securely — no router changes required.
-- **Dashboard**: a universal UX surface for Files, Discussions, Marketplace, Social, Events, Resources, and Settings. For MVP, **Files** and **Discussions** are functional; others may deep‑link to web routes until their native modules land.
-
-> Earlier drafts assumed a Raspberry Pi gateway plus a workstation as the baseline. That hardware is still compatible and valuable, but the **MVP path centers on a single Windows machine** running the client in **Hub mode**. Pi and dedicated gateways are now **optional advanced deployments**, not requirements for first‑time hubs.
+The desktop app is both the **admin dashboard** and the **backend server**. It runs an embedded axum HTTP API that serves files and handles authentication. When a Cloudflare Tunnel is connected, the hub becomes reachable at a public URL (e.g., `https://your-hub.trycloudflare.com` or a custom domain like `hub.citinet.io`).
 
 ---
 
-## Node Types (Citinet Roles)
+## Features
 
-### 1) Hub Node (Community Micro–Data Center)
-Runs the community’s services. In MVP it’s typically **one Windows machine** with Docker containers for the Citinet backend (reverse proxy, API, Postgres, Redis, media storage). Public access is provided via **Cloudflare Tunnel** to `https://{slug}.citinet.io`.
+### Working Now
+- **10-step installation wizard** — node naming, install location, storage allocation, admin account creation, Cloudflare Tunnel setup
+- **User authentication** — bcrypt password hashing, JWT tokens, login/logout flow
+- **File storage** — upload, download, delete with per-user ownership and public/private visibility
+- **Cloudflare Tunnel** — two modes: Quick Tunnel (temporary trycloudflare.com URL) and Custom Domain (API-managed, permanent)
+- **User management** — admin can list users, promote/demote admins, delete accounts
+- **HTTP API** — embedded axum server on port 9090 with REST endpoints for auth, files, and node status
+- **System monitoring** — real-time CPU, memory, disk, and network metrics
+- **Dashboard** — tabbed UI with Files, Admin (users + tunnel), Settings, and Help panels
+- **Theme support** — light, dark, and system-follow themes
 
-### 2) Client Node (Participant Device)
-A laptop/desktop that connects to a hub to use services. The client keeps an **encrypted local cache** for offline use and may **contribute** a capped slice of storage/CPU when idle & on AC power (opt‑in).
-
-### 3) Personal Node (Optional Sovereign Device)
-A device that treats **local data as the primary source of truth**. The client stores encrypted data locally and **syncs** changes to the user’s home hub when online.
-
----
-
-## What the Client Does
-
-### Core MVP Features (Working Now)
-
-- **Role-aware installation wizard** - Choose Hub/Client/Personal with capability checks
-- **Real file storage system** - Upload/download files with quota enforcement and progress tracking
-- **Resource contribution management** - Set and enforce disk, bandwidth, and CPU limits
-- **Cloudflare Tunnel integration** - Expose Hub nodes via HTTPS without port forwarding
-- **Docker container management** - Start/stop/monitor containers for Hub services
-- **Live system monitoring** - Real-time metrics for CPU, memory, disk, network
-- **Secure local database** - SQLite for node config, settings, and file metadata
-- **Theme support** - Light/dark/system themes with persistent preferences
-
-### Infrastructure Ready (Backend Implemented)
-
-- **mDNS service discovery** - Hub broadcasting and Client discovery (UI pending)
-- **Secure storage** - Encrypted SQLite for configuration and credentials
-- **Windows integration** - DPAPI for credential storage, auto-start support
-
-### Planned Features
-
-- **Pairing & auth** - Connect clients to hubs with OAuth-style flow
-- **P2P file sharing** - Direct transfer between nodes when on same network  
-- **Community discussions** - Local forums and messaging
-- **Updates & diagnostics** - Auto-update with signed releases
+### Architecture
+- **SQLite database** — stores node config, tunnel config, users, spaces, and file metadata
+- **Local file storage** — files stored on disk under the configured install path with quota enforcement
+- **Tauri IPC** — 25 commands bridging the React frontend to the Rust backend
+- **Shared state** — `Arc<Mutex<T>>` allows both Tauri commands and the axum API server to access the same StorageManager and TunnelManager
 
 ---
 
-## Citinet Domains & Separation of Concerns
-- `https://citinet.io` – Public information & docs (marketing site). Not a hub.
-- `https://start.citinet.io` – Onboarding wizard (join a node or create one). Not a hub.
-- `https://{node}.citinet.io` – **The actual Citinet experience** for a community (sign‑in, dashboard, files, feeds, marketplace, etc.).
+## Tech Stack
 
-The client routes users to node sub‑spaces as paths, e.g. `https://merryweather.citinet.io/cradleway-library`. Public user profiles live at `/{@handle}` (e.g., `/@sarah`). Private dashboards are accessed at `/dash` after authentication.
+### Frontend
+- React 19 + TypeScript
+- Vite 7
+- Tailwind CSS 4
+- Zustand 5 (state management)
+- Lucide React (icons)
+
+### Backend (Rust)
+- Tauri 2 (desktop shell + IPC)
+- axum 0.8 (embedded HTTP API server)
+- rusqlite (SQLite database)
+- bcrypt + jsonwebtoken (authentication)
+- sysinfo (system metrics)
+- tokio (async runtime)
+- tower-http (CORS)
 
 ---
 
-## Getting Started (Developers)
+## HTTP API Endpoints
+
+The embedded axum server runs on `0.0.0.0:9090` and exposes:
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/health` | No | Health check |
+| GET | `/api/info` | No | Node ID, name, type, storage quota |
+| GET | `/api/status` | No | Uptime, storage usage, online status |
+| POST | `/api/auth/register` | No | Create a new user account |
+| POST | `/api/auth/login` | No | Authenticate and receive JWT |
+| GET | `/api/files` | JWT | List files visible to the authenticated user |
+| POST | `/api/files` | JWT | Upload a file (multipart/form-data) |
+| GET | `/api/files/{name}` | JWT | Download a file |
+| DELETE | `/api/files/{name}` | JWT | Delete a file |
+
+---
+
+## Project Structure
+
+```
+src/                          # React frontend
+├── api/tauri.ts              # Tauri IPC wrapper (CitinetAPI class)
+├── stores/
+│   ├── appStore.ts           # Phase routing (wizard/login/dashboard) + theme
+│   ├── authStore.ts          # Current user + localStorage persistence
+│   ├── configStore.ts        # Node configuration (zustand/persist)
+│   └── wizardStore.ts        # Wizard flow state
+├── components/
+│   ├── LoginScreen.tsx       # Login form
+│   ├── wizard/               # 10-step installation wizard
+│   │   ├── Wizard.tsx        # Step router
+│   │   ├── WizardLayout.tsx  # Shared layout with progress indicator
+│   │   ├── WelcomeStep.tsx
+│   │   ├── LicenseStep.tsx
+│   │   ├── NodeIdentityStep.tsx
+│   │   ├── LocationStep.tsx
+│   │   ├── ContributionSlider.tsx
+│   │   ├── ServiceStep.tsx
+│   │   ├── AdminAccountStep.tsx
+│   │   ├── ProgressStep.tsx  # Runs backend initialization
+│   │   ├── TunnelStep.tsx    # Cloudflare tunnel setup
+│   │   └── CompleteStep.tsx  # Summary + auto-login
+│   ├── dashboard/
+│   │   ├── Dashboard.tsx     # Tab container
+│   │   ├── Sidebar.tsx       # Navigation + user info + logout
+│   │   ├── FilesPanel.tsx    # File upload/download/delete
+│   │   ├── AdminPanel.tsx    # User management + tunnel control
+│   │   └── SettingsPanel.tsx # Resource limits + theme
+│   └── ui/                   # Reusable UI components
+│       ├── Button.tsx
+│       ├── ProgressBar.tsx
+│       └── Toggle.tsx
+src-tauri/src/                # Rust backend
+├── lib.rs                    # Tauri app setup, 25 IPC commands, AppState
+├── storage_manager.rs        # SQLite DB, file I/O, user CRUD
+├── auth.rs                   # bcrypt hashing, JWT generation/validation
+├── hub_api.rs                # axum HTTP server (port 9090)
+├── tunnel_manager.rs         # Cloudflare tunnel orchestration
+└── system_monitor.rs         # CPU, memory, disk, network metrics
+```
+
+---
+
+## Getting Started
 
 ### Prerequisites
 - Node.js 18+
-- Rust (for Tauri)
-- Windows 10/11 (for Windows‑first dev & packaging)
+- Rust 1.77+
+- Windows 10/11
 
-### Install dependencies
+### Development
 ```bash
 npm install
-```
-
-### Run the web dev server
-```bash
-npm run dev
-```
-
-### Run the desktop app (Tauri)
-```bash
 npm run tauri dev
 ```
 
-### Build for production
+This starts both the Vite dev server (port 1420) and the Tauri desktop app. The app will not work if launched directly from the debug binary — it needs the Vite dev server running.
+
+### Production Build
 ```bash
-npm run build        # Frontend only
-npm run tauri build  # Full desktop app
+npm run tauri build
 ```
 
-### Troubleshooting
-If you see “localhost refused to connect”:
-1) Check terminal logs after Vite reports readiness.
-2) Try `http://127.0.0.1:1420/`.
-3) Verify the actual port (Vite may have picked a free port).
-4) Clear cache: delete `node_modules/.vite` and retry.
-5) Ensure Windows Firewall is not blocking Node.js.
-6) On corporate devices, check antivirus/endpoint controls.
+Produces a standalone `.exe` installer in `src-tauri/target/release/bundle/`.
 
----
-
-## Hub Mode (Windows) — How it Works
-
-1. **Choose Hub** in the first‑run wizard.
-2. **Pre‑flight checks**: Windows version, admin rights for services, ports 80/443 availability, free disk path for data, Docker Desktop presence (we prompt with a link; we do not silently install).
-3. **Provision**: Enter the **provision token** from `start.citinet.io`. The client registers the node, writes `cloudflared` config, and sets up the local reverse proxy.
-4. **Launch services**: Start Docker containers (reverse proxy, API, DB, cache) and bring the node online.
-5. **Tunnel**: `cloudflared` runs as a Windows service; the node is reachable at `https://{slug}.citinet.io` via Cloudflare Tunnel.
-6. **Health**: The Admin panel shows green checks for Tunnel, Proxy, API, DB, and Storage.
-
-### Example: `cloudflared` config (Windows)
-```yaml
-# C:\\ProgramData\\Citinet\\cloudflared\\config.yml
-
-# unique tunnel id for this node
-tunnel: slug-node-uuid
-credentials-file: C:\\ProgramData\\Citinet\\cloudflared\\slug-node-uuid.json
-
-ingress:
-  - hostname: slug.citinet.io
-    service: http://localhost:8080
-  - service: http_status:404
+### Tests
+```bash
+npm run test          # Run once
+npm run test:watch    # Watch mode
 ```
 
-> Security: the local reverse proxy binds to **localhost** only; the tunnel is the **only** public ingress. Rotate tunnel credentials from the Admin panel as needed.
-
 ---
 
-## Profiles & Feature Matrix (MVP)
+## App Flow
 
-### Hub
-- Docker‑based backend (reverse proxy, API, Postgres, Redis)
-- Cloudflare Tunnel service management
-- Health checks, backups (roadmap), admin panel
-
-### Client
-- Encrypted local cache (SQLite)
-- Pairing & auth to any node
-- Optional contribution of storage/compute (capped, idle‑only)
-
-### Personal
-- Local‑first primary data store (encrypted)
-- Optional sync to a home node
-- Same dashboard UI; sovereignty‑first defaults
-
----
-
-## Security & Privacy
-- **Secrets** stored with **Windows Credential Manager/DPAPI**.
-- **Local DB** is encrypted; WAL mode; safe migrations.
-- **HTTPS required**; reject clear‑text except during local dev.
-- **No arbitrary code execution** from nodes; background tasks are signed and sandboxed.
-- **Telemetry is opt‑in**, minimal, and anonymous. Easy to disable.
-
----
-
-## Roadmap (High‑level)
-1) **Windows MVP (this repo)**: profiles, secure storage, pairing/auth, Files + Discussions, Tunnel, installer, auto‑update, diagnostics.
-2) **Linux/macOS** packaging; abstract OS‑specific keychain and services.
-3) **Mobile** clients (Tauri Mobile / Capacitor), background sync.
-4) **Real Node backend** for `https://{node}.citinet.io` (registry, API, DB schema, media store).
-5) **Federation** for public content; **Matrix** (optional) for E2EE DMs.
-6) **Resource Units** (add machines to a node cluster); MinIO for media; DB replicas.
-7) **Extensions (Labs)**: minimal, permissioned extension API; local catalog; later a federated directory.
-
----
-
-## Technology Stack
-
-### Frontend
-- React + TypeScript
-- Vite
-- Tailwind CSS
-- Zustand (or Redux/RTK — see repo)
-- Lucide React (icons)
-
-### Desktop Shell
-- Tauri 2
-- Rust (Tauri commands, background tasks, OS integration)
-- `rusqlite` (encrypted local DB)
-- `sysinfo` (resource metrics), `tokio` (async)
-
----
-
-## Contributing
-PRs welcome! Before large changes, open an issue to discuss scope and design.
-
-Please see:
-- `docs/ARCHITECTURE.md` — profiles, storage, auth, tunnel, reverse proxy, feature flags
-- `docs/INSTALLER.md` — system requirements, first‑run wizard, Hub prerequisites
-- `docs/SECURITY.md` — secret storage, encryption, permissions, telemetry
+1. **First launch** — the wizard runs: name your node, pick install location, set storage quota, create admin account, optionally configure Cloudflare Tunnel
+2. **Installation** — ProgressStep creates directories, initializes SQLite, saves config, creates the admin user
+3. **Auto-login** — after the wizard, the admin is automatically logged in and lands on the dashboard
+4. **Subsequent launches** — the app auto-loads the previously configured node and shows the login screen
+5. **Dashboard** — Files panel for managing stored files, Admin panel for user and tunnel management, Settings for resource limits and theme
+6. **Logout** — clears auth state and returns to the login screen
 
 ---
 
 ## License
-See `ATTRIBUTIONS.md` for third‑party notices.
-
 Citizens' Digital Infrastructure Project — Citinet
