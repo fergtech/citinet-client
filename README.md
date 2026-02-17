@@ -1,376 +1,236 @@
-# Citizens Inter-networking (Citinet)
 
-### Local Mesh Node Application
+# Citinet Client (Windows-first MVP)
 
-**Digital infrastructure for hyperlocal communities. Owned by neighbors, not corporations.**
-
----
-
-## What Is Citinet?
-
-Citizens Inter-networking, codename Citi-Net or Citinet, is a community-driven, independent network system composed of many small, locally operated "micro-data centers." These nodes communicate using open, standard Internet protocols but operate outside the control of traditional monopolies, big corporations, and large government agencies.
-
-Citinet provides alternative layers, platforms, and digital resources that ordinary people can run, own, and use — without surveillance, centralized control, or extractive business models.
-
-Citinet is not a replacement for the physical Internet — it is a replacement for the centralized platforms that currently dominate it. It transforms houses into micro data centers, neighborhoods into interconnected digital communities, and citizens into owners of their digital world.
-
-**A network of citizen-owned networks.**
+**Digital infrastructure for hyperlocal communities — owned by neighbors, not corporations.**
 
 ---
 
-## Purpose
+## Current MVP Status (Phase 1)
 
-To return digital power, data sovereignty, communication tools, and online community spaces back to citizens. From careful research and practical development, this will be most effectively achieved at the local level.
+This is a **working prototype** focused on core functionality:
 
-Today's Internet is dominated by large corporations, government agencies, massive cloud platforms, exploitative algorithms, and centralized data harvesting systems. Citinet provides an alternative — not by reinventing the entire Internet from scratch, but by building a new layer on top of it: **a layer owned and operated by the people who use it.**
+### ✅ Fully Functional
+- **Installation Wizard** - First-run setup with node type selection (Hub/Client/Personal)
+- **Resource Allocation** - Configure storage, bandwidth, and CPU contribution limits
+- **System Monitoring** - Real-time CPU, memory, disk, and network metrics
+- **File Storage** - Upload, download, delete files with quota enforcement
+- **Cloudflare Tunnel** - Configure and manage public HTTPS access to Hub nodes
+- **Docker Management** - Monitor and control Docker containers
+- **Settings Panel** - Adjust resource limits, themes, and view hardware info
 
----
-
-## This Application's Role
-
-This Local Mesh Node Application is the desktop client that allows users to dedicate portions of their personal device's storage and networking resources to the Citinet infrastructure. It provides:
-
-- **Familiar, polished UX** borrowed from apps billions already use
-- **Local ownership** and transparent governance instead of corporate control
-- **Privacy by default** — pseudonyms welcome, no tracking, local-only visibility
-- **The software foundation** for physical mesh network infrastructure
-
-The web portal at citinet.io houses the full social experience — discussions, marketplace, community spaces, and more. This desktop client is the node management and resource contribution layer.
-
-We're not trying to reinvent how people interact with apps. We're reinventing **what those apps are for** and **who controls them.**
+### 🚧 Coming Later
+- Network discovery (mDNS infrastructure ready)
+- Community features and social networking
+- Peer-to-peer file sharing
+- Marketplace and local services
 
 ---
 
-## Node Types
+## What is Citinet?
+Citinet (Citizens' Inter‑networking) is a local‑first, community‑owned network made of **independently operated nodes** that interconnect using open standards. Each node is run by a household, a small business, a library, a school, or a neighborhood group. Together they form **a network of citizen‑owned networks**.
 
-Citinet supports three distinct modes of operation:
-
-### Hub Node (Community Micro-Data Center)
-- **Purpose**: Host services for your local community
-- **Hardware**: Raspberry Pi + workstation, or dedicated PC
-- **Location**: Home, library, community center, school
-- **Features**: mDNS broadcasting, service hosting, resource management
-- **For**: Community organizers, libraries, makerspaces
-
-### Client Node (Participant Device)
-- **Purpose**: Connect to nearby hubs and use services
-- **Hardware**: Phone, laptop, desktop computer
-- **Location**: Anywhere within network range
-- **Features**: Zero-config discovery, minimal resource usage
-- **For**: Most users—students, residents, community members
-
-### Personal Node (Optional Sovereign Device)
-- **Purpose**: Your primary data store that syncs to hubs
-- **Hardware**: Desktop, laptop, or dedicated device
-- **Location**: Your home or office
-- **Features**: Local-first storage, offline-capable, full data sovereignty
-- **For**: Users who want complete control over their data
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
+Citinet does **not** replace the physical Internet. It replaces the *centralized platform model* that currently dominates it by giving communities the tooling to run their **own cloud**: identity, storage, feeds, messaging, marketplace, and discovery — all locally controlled and privacy‑respecting.
 
 ---
 
-## The Citinet Ecosystem
+## Current MVP Architecture (2026)
+This repository contains the **Citinet Client** — a Tauri + React desktop application that acts as the universal installer, dashboard, and sync engine for Citinet.
 
-The complete Citinet ecosystem consists of:
+- **Windows‑first** (Windows 10/11). Linux/macOS and mobile will follow.
+- **One installer → three roles:**
+  - **Hub** – community micro–data center (runs services & DB in containers).
+  - **Client** – participant device (lightweight, optional contribution of storage/compute).
+  - **Personal** – sovereign device (user’s primary store, with optional sync to a home node).
+- **Ingress**: Hubs use **Cloudflare Tunnel** (managed by the client) to expose `https://{node}.citinet.io` securely — no router changes required.
+- **Dashboard**: a universal UX surface for Files, Discussions, Marketplace, Social, Events, Resources, and Settings. For MVP, **Files** and **Discussions** are functional; others may deep‑link to web routes until their native modules land.
 
-| Component | Description |
-|-----------|-------------|
-| Web Browsers | Open-source or trusted browsers |
-| Search | Independent search options |
-| Social Networking | Community-hosted platforms (citinet.io portal) |
-| Messaging | Decentralized, encrypted messaging |
-| Email & Identity | Peer-run email and identity systems |
-| Marketplace | Community exchange and resource sharing (citinet.io portal) |
-| Storage | Local-first data storage and file sharing |
-| Citinet OS | Custom operating system and dashboard |
-| Desktop Client | Node management and resource contribution (this application) |
+> Earlier drafts assumed a Raspberry Pi gateway plus a workstation as the baseline. That hardware is still compatible and valuable, but the **MVP path centers on a single Windows machine** running the client in **Hub mode**. Pi and dedicated gateways are now **optional advanced deployments**, not requirements for first‑time hubs.
 
 ---
 
-## Technical Philosophy
+## Node Types (Citinet Roles)
 
-Citinet operates on the principle of inter-networking — exactly what the original Internet was meant to be:
+### 1) Hub Node (Community Micro–Data Center)
+Runs the community’s services. In MVP it’s typically **one Windows machine** with Docker containers for the Citinet backend (reverse proxy, API, Postgres, Redis, media storage). Public access is provided via **Cloudflare Tunnel** to `https://{slug}.citinet.io`.
 
-> *"A network of networks, freely connecting independent systems using shared protocols."*
+### 2) Client Node (Participant Device)
+A laptop/desktop that connects to a hub to use services. The client keeps an **encrypted local cache** for offline use and may **contribute** a capped slice of storage/CPU when idle & on AC power (opt‑in).
 
-Each Citinet node is independently owned, independently configured, and independently governed. All nodes communicate with each other as peers.
-
----
-
-## Physical Infrastructure
-
-### Traditional Corporate/Government Data Centers
-
-Massive, centralized facilities typically include hundreds or thousands of enterprise-grade servers, multi-room racks of storage, dozens of firewalls and networking appliances, redundant power systems, and industrial cooling — all at multi-million-dollar annual operating costs. These structures are effective for scale, but they centralize data, power, control, surveillance, and economic dependence.
-
-### Citinet Micro-Data Point Architecture
-
-A fully functional Citinet node — enough to serve a household, library, community center, dorm, or small neighborhood — requires only:
-
-| Component | Purpose |
-|-----------|---------|
-| 5- or 8-port network switch | Local LAN backbone |
-| Raspberry Pi | Gateway, identity provider, security layer, local services |
-| PC tower / workstation | Primary compute + storage |
-| Ethernet cables | Wired connections |
-| Citinet OS | Operating system (coming soon) |
-| Wi-Fi extender (optional) | Wireless local topology |
-
-This setup provides local cloud features, social networking, messaging, storage, small-scale hosting, community identity, dashboards, admin tools, and future mesh capabilities — all at a fraction of the cost of traditional systems.
-
-### Node Locations
-
-Citinet is designed for citizens' homes, apartment bedrooms, student dorms, public libraries, community centers, coworking spaces, small businesses, makerspaces, and neighborhood hubs. Each location becomes a micro data point participating in the greater Citinet mesh.
+### 3) Personal Node (Optional Sovereign Device)
+A device that treats **local data as the primary source of truth**. The client stores encrypted data locally and **syncs** changes to the user’s home hub when online.
 
 ---
 
-## Software Layer
+## What the Client Does
 
-### Traditional Corporate Software
+### Core MVP Features (Working Now)
 
-Platforms like AWS, Google Cloud, Azure, Microsoft 365, Gmail, and Meta offer powerful tools, but at the cost of surveillance, data extraction, centralized control, dependency, algorithmic manipulation, and censorship risks.
+- **Role-aware installation wizard** - Choose Hub/Client/Personal with capability checks
+- **Real file storage system** - Upload/download files with quota enforcement and progress tracking
+- **Resource contribution management** - Set and enforce disk, bandwidth, and CPU limits
+- **Cloudflare Tunnel integration** - Expose Hub nodes via HTTPS without port forwarding
+- **Docker container management** - Start/stop/monitor containers for Hub services
+- **Live system monitoring** - Real-time metrics for CPU, memory, disk, network
+- **Secure local database** - SQLite for node config, settings, and file metadata
+- **Theme support** - Light/dark/system themes with persistent preferences
 
-### Citinet Software Layer
+### Infrastructure Ready (Backend Implemented)
 
-Citinet replaces centralized accounts, social media, storage, identity, messaging, local marketplaces, and discovery with:
+- **mDNS service discovery** - Hub broadcasting and Client discovery (UI pending)
+- **Secure storage** - Encrypted SQLite for configuration and credentials
+- **Windows integration** - DPAPI for credential storage, auto-start support
 
-- Open-source or trusted web apps
-- Community-hosted services
-- Peer-to-peer nodes
-- Encrypted messaging
-- Local-first social feeds
-- Decentralized storage
-- Transparent governance
-- Citizen-operated "local clouds"
+### Planned Features
 
-Compatible platforms include Society+, Mastodon/ActivityPub, PeerTube, ProtonMail, Nextcloud, and Matrix. Citinet nodes may run native apps or integrate existing open-source services.
-
----
-
-## Citinet Protocol Stack
-
-Here's how a solo setup maps to the full Citinet architecture:
-
-### Layer 1 — Hardware
-
-- **Raspberry Pi** — gateway, identity provider, initial local services
-- **PC/workstation** — compute + storage + app hosting
-- **Switch** — local LAN backbone
-
-This is a micro-data point matching the minimal hardware footprint envisioned in the whitepaper.
-
-### Layer 2 — Network
-
-The first Citinet node uses the existing LAN (the switch), exposes services via local IP addresses, and optionally exposes a secure endpoint over the internet (WireGuard tunnel) for remote federation later. Clients connect via Wi-Fi or Ethernet to the switch, through the Pi, and into Citinet services.
-
-### Layer 3 — Secure Transport & Overlay
-
-Optional at launch, but even on Day 1 you can run WireGuard on the Pi for encrypted tunnels or Yggdrasil for a peer-to-peer overlay without complex networking configuration. Setting this up early means future nodes can join seamlessly.
-
-### Layer 4 — Federation & Discovery
-
-At the hyperlocal stage, only local discovery is needed: mDNS (Avahi) so Citinet clients auto-discover the Pi, and DNS-SD so services appear automatically. No federation is required until node #2 comes online, but the Pi can publish basic federation endpoints (ActivityPub, Matrix, OIDC) so it's ready when the time comes.
-
-### Layer 5 — Identity & Trust
-
-The first and most critical piece — everything else depends on it. The Pi serves as the identity server using something like Keycloak (OIDC) or a lightweight DID method. Community accounts are issued to early users. When another node comes online, identities federate between nodes, giving each community self-governance while following shared Citinet identity rules.
-
-### Layer 6 — Service & Data
-
-Day 1 apps a single node can run:
-
-- Local social feed (ActivityPub micro-instance)
-- Local messaging (Matrix Synapse server)
-- Local storage (Nextcloud)
-- Local community bulletin (simple web app)
-- Local alerts (push notifications or MQTT topic)
-
-Users access everything through the Citinet dashboard. Even a single workstation + Pi creates a full "local cloud."
-
-### Layer 7 — Application
-
-The user-facing layer. The Citinet dashboard becomes the portal, the social layer, the messaging interface, the services entry point, the community awareness hub, and the identity hub. Users don't need to know anything about networks — they just log in and see community, posts, chat, events, and alerts.
-
-This is where mass adoption starts.
+- **Pairing & auth** - Connect clients to hubs with OAuth-style flow
+- **P2P file sharing** - Direct transfer between nodes when on same network  
+- **Community discussions** - Local forums and messaging
+- **Updates & diagnostics** - Auto-update with signed releases
 
 ---
 
-## MVP Launch Path
+## Citinet Domains & Separation of Concerns
+- `https://citinet.io` – Public information & docs (marketing site). Not a hub.
+- `https://start.citinet.io` – Onboarding wizard (join a node or create one). Not a hub.
+- `https://{node}.citinet.io` – **The actual Citinet experience** for a community (sign‑in, dashboard, files, feeds, marketplace, etc.).
 
-### Phase 1 — Founding Node (You + Your Hardware)
-
-Run identity, messaging, social microfeed, local storage, and dashboard UI. Invite a neighbor, a friend, a test group. They install the Citinet client, access the node's dashboard, and start posting, checking events, and messaging. You now have a real micro-community online.
-
-### Phase 2 — Onboarding a Local Partner (e.g., a Library)
-
-The library installs the Citinet client and connects to your node. Library moderators use it for announcements, events, room reservations, local updates, community discussion, file sharing for workshops, and digital literacy programs. The whole library becomes active users — and they invite locals. **This is the moment Citinet becomes real.**
-
-### Phase 3 — A Second Node Goes Live
-
-A high school, community center, neighbor, or local nonprofit installs their own Pi + workstation. Your node federates with theirs. Now data flows between communities following Citinet protocols, with independent governance, identical service protocols, local identity with cross-node trust, and the beginning of a mesh of citizen micro-clouds.
-
-### Why This Works Solo
-
-The MVP depends on open protocols, small-scale services, commodity hardware, local-first architecture, and modular layers. Each part can be built one at a time, and the system still functions. You don't need global federation to launch locally, thousands of nodes to build a micro-community, or perfect UI early on. If your local library finds value, the model works.
+The client routes users to node sub‑spaces as paths, e.g. `https://merryweather.citinet.io/cradleway-library`. Public user profiles live at `/{@handle}` (e.g., `/@sarah`). Private dashboards are accessed at `/dash` after authentication.
 
 ---
 
-## Development Roadmap
-
-### Phase 1 — Core Platform & Real Backend (In Progress)
-
-**UI Complete:**
-- Two-path onboarding (join existing network or create your own)
-- Node discovery and creation wizard
-- Civic onboarding flow — orientation, not signup
-- Local Commons dashboard
-- Chronological feed — no algorithms, no ranking, no manipulation
-- Community discussions organized by type (Discussion, Announcement, Project, Request)
-- Local marketplace for community exchange and resource sharing
-- Network status with active members and node health
-- Privacy by default — pseudonyms welcome, no tracking, local-only visibility
-- Responsive design — desktop sidebar navigation, mobile bottom bar
-- Smart routing with URL-based navigation and browser history support
-- Persistent state — page refreshes maintain your current location
-- In-app navigation with back buttons on all screens
-- Multi-node support with selected node name displayed throughout
-
-**Backend Implemented:**
-- ✅ Real system resource monitoring (CPU, memory, disk, network bandwidth)
-- ✅ Hardware detection (automatically detects Raspberry Pi)
-- ✅ mDNS broadcasting for Hub Nodes
-- ✅ mDNS discovery for Client Nodes
-- ✅ Node type configuration (Hub, Client, Personal)
-- ✅ Resource contribution settings (disk space, bandwidth, CPU limits)
-- ✅ Tauri IPC commands connecting frontend to Rust backend
-
-**In Progress:**
-- Resource limit enforcement in backend
-- Persistent configuration storage
-- File storage management for Hub Nodes
-- Personal Node sync engine
-- Service health monitoring
-
-### Phase 2 — Physical Mesh Nodes (Next)
-
-Physical mesh network nodes that community members can install as access points. Implementation includes:
-- Encrypted peer-to-peer connections (WireGuard)
-- Federation protocols (ActivityPub, Matrix)
-- Identity management (Keycloak/OIDC)
-- File storage services (Nextcloud integration)
-- Raspberry Pi system image with auto-configuration
-
-### Phase 3 — ISP Sharing & Internet Independence (Future)
-
-Resilient, community-owned, surveillance-free local internet. Users will set up physical nodes in their homes and businesses, creating a mesh network that provides internet access independent of traditional ISPs. Includes bandwidth sharing, mesh WiFi, and community-owned infrastructure.
-
----
-
-## Design Philosophy
-
-**What we borrow from commercial apps:**
-- Clean, modern design language
-- Intuitive navigation patterns users already understand
-- Mobile-first, responsive layouts
-- Smooth animations and polished micro-interactions
-
-**What we reject:**
-- Algorithmic feeds designed to maximize engagement
-- Surveillance-based business models
-- Extractive data practices
-- Corporate ownership of community infrastructure
-
-**The result:** An app that feels as natural to use as Instagram or Twitter, but serves your actual neighbors instead of distant shareholders.
-
----
-
-## Why Citinet Matters
-
-Citinet enables citizen-controlled data, community-hosted spaces, meaningful local identity, human-centered digital experiences, censorship-resistant content, organic network growth, and easy digital infrastructure building.
-
-It returns independence, decentralization, locality, privacy, and public digital ownership — with modern UX, simplicity, and accessibility.
-
----
-
-## Getting Started
+## Getting Started (Developers)
 
 ### Prerequisites
+- Node.js 18+
+- Rust (for Tauri)
+- Windows 10/11 (for Windows‑first dev & packaging)
 
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust](https://www.rust-lang.org/) (for Tauri backend)
-
-### Install Dependencies
-
+### Install dependencies
 ```bash
 npm install
 ```
 
-### Run Development Server
-
+### Run the web dev server
 ```bash
 npm run dev
 ```
 
-The Vite dev server will start at `http://localhost:1420`.
-
-### Run Desktop App (Tauri)
-
+### Run the desktop app (Tauri)
 ```bash
 npm run tauri dev
 ```
 
-### Build for Production
-
+### Build for production
 ```bash
-npm run build          # Frontend only
-npm run tauri build    # Full desktop app
+npm run build        # Frontend only
+npm run tauri build  # Full desktop app
 ```
 
 ### Troubleshooting
+If you see “localhost refused to connect”:
+1) Check terminal logs after Vite reports readiness.
+2) Try `http://127.0.0.1:1420/`.
+3) Verify the actual port (Vite may have picked a free port).
+4) Clear cache: delete `node_modules/.vite` and retry.
+5) Ensure Windows Firewall is not blocking Node.js.
+6) On corporate devices, check antivirus/endpoint controls.
 
-If you see "localhost refused to connect":
+---
 
-1. Check your terminal for error messages after "VITE ready"
-2. Try `http://localhost:1420/` or `http://127.0.0.1:1420/`
-3. Check the terminal for the actual port (it may use a different one if 1420 is busy)
-4. Delete `node_modules/.vite` and restart to clear cache
-5. Ensure Windows Firewall isn't blocking Node.js
-6. Try running your terminal as administrator
+## Hub Mode (Windows) — How it Works
+
+1. **Choose Hub** in the first‑run wizard.
+2. **Pre‑flight checks**: Windows version, admin rights for services, ports 80/443 availability, free disk path for data, Docker Desktop presence (we prompt with a link; we do not silently install).
+3. **Provision**: Enter the **provision token** from `start.citinet.io`. The client registers the node, writes `cloudflared` config, and sets up the local reverse proxy.
+4. **Launch services**: Start Docker containers (reverse proxy, API, DB, cache) and bring the node online.
+5. **Tunnel**: `cloudflared` runs as a Windows service; the node is reachable at `https://{slug}.citinet.io` via Cloudflare Tunnel.
+6. **Health**: The Admin panel shows green checks for Tunnel, Proxy, API, DB, and Storage.
+
+### Example: `cloudflared` config (Windows)
+```yaml
+# C:\\ProgramData\\Citinet\\cloudflared\\config.yml
+
+# unique tunnel id for this node
+tunnel: slug-node-uuid
+credentials-file: C:\\ProgramData\\Citinet\\cloudflared\\slug-node-uuid.json
+
+ingress:
+  - hostname: slug.citinet.io
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+> Security: the local reverse proxy binds to **localhost** only; the tunnel is the **only** public ingress. Rotate tunnel credentials from the Admin panel as needed.
+
+---
+
+## Profiles & Feature Matrix (MVP)
+
+### Hub
+- Docker‑based backend (reverse proxy, API, Postgres, Redis)
+- Cloudflare Tunnel service management
+- Health checks, backups (roadmap), admin panel
+
+### Client
+- Encrypted local cache (SQLite)
+- Pairing & auth to any node
+- Optional contribution of storage/compute (capped, idle‑only)
+
+### Personal
+- Local‑first primary data store (encrypted)
+- Optional sync to a home node
+- Same dashboard UI; sovereignty‑first defaults
+
+---
+
+## Security & Privacy
+- **Secrets** stored with **Windows Credential Manager/DPAPI**.
+- **Local DB** is encrypted; WAL mode; safe migrations.
+- **HTTPS required**; reject clear‑text except during local dev.
+- **No arbitrary code execution** from nodes; background tasks are signed and sandboxed.
+- **Telemetry is opt‑in**, minimal, and anonymous. Easy to disable.
+
+---
+
+## Roadmap (High‑level)
+1) **Windows MVP (this repo)**: profiles, secure storage, pairing/auth, Files + Discussions, Tunnel, installer, auto‑update, diagnostics.
+2) **Linux/macOS** packaging; abstract OS‑specific keychain and services.
+3) **Mobile** clients (Tauri Mobile / Capacitor), background sync.
+4) **Real Node backend** for `https://{node}.citinet.io` (registry, API, DB schema, media store).
+5) **Federation** for public content; **Matrix** (optional) for E2EE DMs.
+6) **Resource Units** (add machines to a node cluster); MinIO for media; DB replicas.
+7) **Extensions (Labs)**: minimal, permissioned extension API; local catalog; later a federated directory.
 
 ---
 
 ## Technology Stack
 
 ### Frontend
-| Technology | Purpose |
-|-----------|---------|
-| React 19 | UI framework |
-| TypeScript | Type safety |
-| Vite 7 | Build tool |
-| Tailwind CSS 4 | Styling |
-| Zustand | State management |
-| Lucide React | Icons |
+- React + TypeScript
+- Vite
+- Tailwind CSS
+- Zustand (or Redux/RTK — see repo)
+- Lucide React (icons)
 
-### Backend
-| Technology | Purpose |
-|-----------|---------|
-| Tauri 2 | Desktop app runtime |
-| Rust | System-level programming |
-| sysinfo | Real-time system metrics (CPU, memory, disk, network) |
-| mdns-sd | Network discovery (mDNS/DNS-SD) |
-| tokio | Async runtime |
-| rusqlite | SQLite database (future: data persistence) |
-| anyhow | Error handling |
+### Desktop Shell
+- Tauri 2
+- Rust (Tauri commands, background tasks, OS integration)
+- `rusqlite` (encrypted local DB)
+- `sysinfo` (resource metrics), `tokio` (async)
 
-### Network & Discovery
-- **Local Discovery**: mDNS broadcasting and discovery (`_citinet._tcp.local.`)
-- **Future**: WireGuard tunnels, ActivityPub federation, Matrix messaging
+---
+
+## Contributing
+PRs welcome! Before large changes, open an issue to discuss scope and design.
+
+Please see:
+- `docs/ARCHITECTURE.md` — profiles, storage, auth, tunnel, reverse proxy, feature flags
+- `docs/INSTALLER.md` — system requirements, first‑run wizard, Hub prerequisites
+- `docs/SECURITY.md` — secret storage, encryption, permissions, telemetry
 
 ---
 
 ## License
-
-See ATTRIBUTIONS.md for third-party licenses and credits.
+See `ATTRIBUTIONS.md` for third‑party notices.
 
 Citizens' Digital Infrastructure Project — Citinet

@@ -1,11 +1,20 @@
 import { useEffect } from "react";
 import { useAppStore } from "./stores/appStore";
+import { useAuthStore } from "./stores/authStore";
 import { Wizard } from "./components/wizard/Wizard";
-import { Onboarding } from "./components/onboarding/Onboarding";
+import { LoginScreen } from "./components/LoginScreen";
 import { Dashboard } from "./components/dashboard/Dashboard";
 
 function App() {
-  const { phase, theme } = useAppStore();
+  const { phase, setPhase, theme } = useAppStore();
+  const currentUser = useAuthStore((s) => s.currentUser);
+
+  // Redirect to login if dashboard but no auth
+  useEffect(() => {
+    if (phase === "dashboard" && !currentUser) {
+      setPhase("login");
+    }
+  }, [phase, currentUser, setPhase]);
 
   // Apply theme class to document
   useEffect(() => {
@@ -33,10 +42,10 @@ function App() {
   switch (phase) {
     case "wizard":
       return <Wizard />;
-    case "onboarding":
-      return <Onboarding />;
+    case "login":
+      return <LoginScreen />;
     case "dashboard":
-      return <Dashboard />;
+      return currentUser ? <Dashboard /> : <LoginScreen />;
   }
 }
 

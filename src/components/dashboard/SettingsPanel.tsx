@@ -4,19 +4,21 @@ import { useConfigStore } from "../../stores/configStore";
 import { Card } from "../ui/Card";
 import { Toggle } from "../ui/Toggle";
 import { Sun, Moon, Monitor, HardDrive, Wifi, Cpu, AlertCircle, Activity } from "lucide-react";
-import { CitinetAPI, HardwareInfo } from "../../api/tauri";
-import { useFeatureFlags, PROFILE_FLAGS } from "../../lib/features";
+import { CitinetAPI, HardwareInfo, DriveSpace } from "../../api/tauri";
 
 export function SettingsPanel() {
   const { theme, setTheme } = useAppStore();
   const { contribution, setContribution, nodeType } = useConfigStore();
-  const featureFlags = useFeatureFlags();
   const [hwInfo, setHwInfo] = useState<HardwareInfo | null>(null);
+  const [driveSpace, setDriveSpace] = useState<DriveSpace | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     CitinetAPI.getHardwareInfo()
       .then(setHwInfo)
+      .catch(console.error);
+    CitinetAPI.getInstallDriveSpace()
+      .then(setDriveSpace)
       .catch(console.error);
   }, []);
 
@@ -41,7 +43,7 @@ export function SettingsPanel() {
     { mode: "system", label: "System", icon: Monitor },
   ];
 
-  const maxDiskGB = hwInfo ? Math.floor(hwInfo.total_disk_gb * 0.5) : 100; // Max 50% of total disk
+  const maxDiskGB = driveSpace ? Math.floor(driveSpace.total_gb * 0.5) : (hwInfo ? Math.floor(hwInfo.total_disk_gb * 0.5) : 100);
   const maxBandwidthMbps = 100; // Reasonable default
   const maxCpuPercent = 50; // Max 50% CPU
 
@@ -298,21 +300,6 @@ export function SettingsPanel() {
               </span>
             </div>
           )}
-          <div className="mt-3">
-            <span className="text-[var(--text-secondary)] text-xs">Enabled Features</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {(Object.entries(featureFlags) as [string, boolean][])
-                .filter(([, enabled]) => enabled)
-                .map(([flag]) => (
-                  <span
-                    key={flag}
-                    className="px-2 py-0.5 text-xs rounded-full bg-primary-500/10 text-primary-500 font-medium"
-                  >
-                    {flag.replace(/_/g, ' ')}
-                  </span>
-                ))}
-            </div>
-          </div>
         </div>
       </Card>
     </div>

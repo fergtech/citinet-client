@@ -1,195 +1,46 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card } from "../ui/Card";
-import { CitinetAPI, DockerStatus, DockerContainer, CloudflaredStatus, TunnelStatus } from "../../api/tauri";
+import { CitinetAPI, TunnelStatus, User } from "../../api/tauri";
+import { useConfigStore } from "../../stores/configStore";
 import {
-  Container, Play, Square, RotateCcw, AlertCircle, CheckCircle2,
-  Globe, Link, Loader2,
+  Globe, Link, Loader2, CheckCircle2, AlertCircle, Copy, Check,
+  Users, Shield, ShieldOff, Trash2,
 } from "lucide-react";
-
-// --- Docker Section ---
-
-function DockerSection() {
-  const [status, setStatus] = useState<DockerStatus | null>(null);
-  const [containers, setContainers] = useState<DockerContainer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    CitinetAPI.checkDocker().then((s) => {
-      setStatus(s);
-      if (s.running) {
-        CitinetAPI.listDockerContainers()
-          .then(setContainers)
-          .catch(console.error);
-      }
-      setLoading(false);
-    }).catch((e) => {
-      console.error(e);
-      setLoading(false);
-    });
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
-  }, [refresh]);
-
-  const handleAction = async (id: string, action: "start" | "stop" | "restart") => {
-    setActionLoading(`${id}-${action}`);
-    try {
-      if (action === "start") await CitinetAPI.startDockerContainer(id);
-      else if (action === "stop") await CitinetAPI.stopDockerContainer(id);
-      else await CitinetAPI.restartDockerContainer(id);
-      refresh();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  if (loading) {
-    return (
-      <Card>
-        <div className="flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
-          <span className="text-sm text-[var(--text-secondary)]">Checking Docker...</span>
-        </div>
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <Container className="w-5 h-5 text-primary-500" />
-          <h3 className="text-sm font-medium text-[var(--text-primary)]">Docker</h3>
-        </div>
-
-        {!status?.installed ? (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)]">
-            <AlertCircle className="w-4 h-4 text-[var(--text-muted)] mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm text-[var(--text-primary)] font-medium">Docker Not Detected</p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Install Docker Desktop to manage containers from this panel.
-              </p>
-            </div>
-          </div>
-        ) : !status.running ? (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-            <AlertCircle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">Docker Not Running</p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Start Docker Desktop to manage containers. {status.error}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-accent-500" />
-            <span className="text-sm text-[var(--text-primary)]">
-              Docker {status.version} — Running
-            </span>
-          </div>
-        )}
-      </Card>
-
-      {status?.running && (
-        <Card>
-          <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-3">
-            Containers ({containers.length})
-          </h3>
-          {containers.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)]">No containers found.</p>
-          ) : (
-            <div className="space-y-2">
-              {containers.map((c) => {
-                const isRunning = c.state === "running";
-                return (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-[var(--border-color)]"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${isRunning ? "bg-accent-500" : "bg-surface-400"}`} />
-                        <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-                          {c.names}
-                        </span>
-                      </div>
-                      <div className="flex gap-3 mt-1 text-xs text-[var(--text-muted)]">
-                        <span>{c.image}</span>
-                        <span>{c.status}</span>
-                        {c.ports && <span>{c.ports}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 ml-2 shrink-0">
-                      {!isRunning && (
-                        <button
-                          onClick={() => handleAction(c.id, "start")}
-                          disabled={actionLoading !== null}
-                          className="p-1.5 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-accent-500"
-                          title="Start"
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                      )}
-                      {isRunning && (
-                        <button
-                          onClick={() => handleAction(c.id, "stop")}
-                          disabled={actionLoading !== null}
-                          className="p-1.5 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-red-500"
-                          title="Stop"
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleAction(c.id, "restart")}
-                        disabled={actionLoading !== null}
-                        className="p-1.5 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-[var(--text-secondary)]"
-                        title="Restart"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      )}
-    </div>
-  );
-}
 
 // --- Tunnel Section ---
 
+type TunnelMode = "choose" | "quick" | "custom";
+type SetupPhase = "idle" | "connecting" | "done" | "error";
+
+interface SetupStep {
+  label: string;
+  status: "pending" | "running" | "done" | "failed";
+  error?: string;
+}
+
+function generateSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 63);
+}
+
 function TunnelSection() {
-  const [cfStatus, setCfStatus] = useState<CloudflaredStatus | null>(null);
   const [tunnelStatus, setTunnelStatus] = useState<TunnelStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [setupMode, setSetupMode] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [mode, setMode] = useState<TunnelMode>("choose");
+  const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
 
-  // Setup form state
+  // Custom domain form state
   const [apiToken, setApiToken] = useState("");
-  const [tunnelName, setTunnelName] = useState("");
-  const [localPort, setLocalPort] = useState(9090);
+  const [customHostname, setCustomHostname] = useState("");
+  const [steps, setSteps] = useState<SetupStep[]>([]);
+  const [copied, setCopied] = useState(false);
 
-  const hostname = tunnelName ? `${tunnelName}.citinet.io` : "";
+  const nodeName = useConfigStore((s) => s.nodeName);
+  const tunnelSlug = generateSlug(nodeName || "citinet-hub");
 
   const refresh = useCallback(() => {
-    Promise.all([
-      CitinetAPI.checkCloudflared(),
-      CitinetAPI.getTunnelStatus(),
-    ]).then(([cf, ts]) => {
-      setCfStatus(cf);
+    CitinetAPI.getTunnelStatus().then((ts) => {
       setTunnelStatus(ts);
       setLoading(false);
     }).catch((e) => {
@@ -204,17 +55,117 @@ function TunnelSection() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const handleSetup = async () => {
-    if (!apiToken || !tunnelName) return;
-    setActionLoading(true);
+  const updateStep = (
+    index: number,
+    update: Partial<SetupStep>,
+    prev: SetupStep[]
+  ): SetupStep[] => {
+    const next = [...prev];
+    next[index] = { ...next[index], ...update };
+    return next;
+  };
+
+  // Quick Connect: install + quick tunnel in one click
+  const handleQuickConnect = async () => {
+    setMode("quick");
+    setSetupPhase("connecting");
+
+    let currentSteps: SetupStep[] = [
+      { label: "Installing cloudflared", status: "pending" },
+      { label: "Starting tunnel", status: "pending" },
+    ];
+    setSteps(currentSteps);
+
+    // Step 1: Install
+    currentSteps = updateStep(0, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
     try {
-      await CitinetAPI.setupTunnel(apiToken, tunnelName, hostname, localPort);
-      setSetupMode(false);
+      await CitinetAPI.installCloudflared();
+      currentSteps = updateStep(0, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(0, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+      return;
+    }
+
+    // Step 2: Start quick tunnel
+    currentSteps = updateStep(1, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    try {
+      const url = await CitinetAPI.startQuickTunnel(9090);
+      currentSteps = updateStep(1, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+      setPublicUrl(url);
+      setSetupPhase("done");
       refresh();
     } catch (e) {
-      console.error(e);
-    } finally {
-      setActionLoading(false);
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(1, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+    }
+  };
+
+  // Custom Domain: install + API tunnel + DNS
+  const handleCustomConnect = async () => {
+    if (!apiToken || !customHostname) return;
+    setSetupPhase("connecting");
+
+    let currentSteps: SetupStep[] = [
+      { label: "Installing cloudflared", status: "pending" },
+      { label: "Creating tunnel", status: "pending" },
+      { label: "Starting tunnel", status: "pending" },
+    ];
+    setSteps(currentSteps);
+
+    // Step 1: Install
+    currentSteps = updateStep(0, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    try {
+      await CitinetAPI.installCloudflared();
+      currentSteps = updateStep(0, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(0, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+      return;
+    }
+
+    // Step 2: Setup tunnel via API
+    currentSteps = updateStep(1, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    try {
+      await CitinetAPI.setupTunnel(apiToken, tunnelSlug, customHostname, 9090);
+      currentSteps = updateStep(1, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(1, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+      return;
+    }
+
+    // Step 3: Start tunnel
+    currentSteps = updateStep(2, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    try {
+      await CitinetAPI.startTunnel();
+      currentSteps = updateStep(2, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+      setPublicUrl(`https://${customHostname}`);
+      setSetupPhase("done");
+      refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(2, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
     }
   };
 
@@ -247,55 +198,153 @@ function TunnelSection() {
       <Card>
         <div className="flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
-          <span className="text-sm text-[var(--text-secondary)]">Checking cloudflared...</span>
+          <span className="text-sm text-[var(--text-secondary)]">Checking tunnel status...</span>
         </div>
       </Card>
     );
   }
 
+  // Already configured — show status + controls
+  if (tunnelStatus?.configured && tunnelStatus.config) {
+    const isQuick = tunnelStatus.config.mode === "quick";
+    return (
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <Globe className="w-5 h-5 text-primary-500" />
+          <h3 className="text-sm font-medium text-[var(--text-primary)]">Public Access</h3>
+          {isQuick && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-[var(--text-muted)]">
+              Quick Tunnel
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-[var(--text-secondary)]">Status</span>
+            <span className={`font-medium ${tunnelStatus.running ? "text-accent-500" : "text-[var(--text-muted)]"}`}>
+              {tunnelStatus.running ? "Running" : "Stopped"}
+            </span>
+          </div>
+          <div>
+            <span className="text-[var(--text-secondary)] text-sm">Public URL</span>
+            <div className="flex items-center gap-2 mt-1 p-2 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)]">
+              <a
+                href={`https://${tunnelStatus.config.hostname}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 text-sm font-medium text-primary-500 hover:underline break-all"
+              >
+                {tunnelStatus.config.hostname}
+              </a>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`https://${tunnelStatus.config!.hostname}`);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors shrink-0"
+                title="Copy URL"
+              >
+                {copied ? (
+                  <Check className="w-4 h-4 text-accent-500" />
+                ) : (
+                  <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {isQuick && (
+          <p className="text-xs text-[var(--text-muted)] mt-3">
+            Quick tunnel URL changes on restart. Set up a custom domain for a permanent URL.
+          </p>
+        )}
+
+        <div className="flex gap-2 mt-4">
+          {!tunnelStatus.running ? (
+            <button
+              onClick={handleStart}
+              disabled={actionLoading}
+              className="flex-1 py-2 px-4 rounded-lg bg-accent-500 text-white text-sm font-medium hover:bg-accent-600 transition-colors disabled:opacity-50"
+            >
+              Start Tunnel
+            </button>
+          ) : (
+            <button
+              onClick={handleStop}
+              disabled={actionLoading}
+              className="flex-1 py-2 px-4 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
+            >
+              Stop Tunnel
+            </button>
+          )}
+        </div>
+      </Card>
+    );
+  }
+
+  // Not configured — show setup options
   return (
     <div className="space-y-4">
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-5 h-5 text-primary-500" />
-          <h3 className="text-sm font-medium text-[var(--text-primary)]">Cloudflare Tunnel</h3>
+          <h3 className="text-sm font-medium text-[var(--text-primary)]">Public Access</h3>
         </div>
+        <p className="text-xs text-[var(--text-muted)] mb-4">
+          Make your hub discoverable so others can find and join your network.
+        </p>
 
-        {!cfStatus?.installed ? (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)]">
-            <AlertCircle className="w-4 h-4 text-[var(--text-muted)] mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm text-[var(--text-primary)] font-medium">cloudflared Not Detected</p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Install cloudflared to expose your hub node at a public URL.
+        {/* Mode chooser */}
+        {mode === "choose" && setupPhase === "idle" && (
+          <div className="space-y-3">
+            <button
+              onClick={handleQuickConnect}
+              className="w-full p-4 rounded-lg border border-[var(--border-color)] hover:border-primary-500 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-[var(--text-primary)]">Quick Connect</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-500/20 text-accent-500 font-medium">
+                  Recommended
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                One click — get an instant public URL. No account needed. URL is temporary.
               </p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-accent-500" />
-            <span className="text-sm text-[var(--text-primary)]">
-              cloudflared {cfStatus.version ?? ""} — Installed
-            </span>
+            </button>
+
+            <button
+              onClick={() => setMode("custom")}
+              className="w-full p-4 rounded-lg border border-[var(--border-color)] hover:border-primary-500 transition-colors text-left"
+            >
+              <span className="text-sm font-medium text-[var(--text-primary)] block mb-1">
+                Custom Domain
+              </span>
+              <p className="text-xs text-[var(--text-muted)]">
+                Use your own domain for a permanent URL. Requires a Cloudflare account.
+              </p>
+            </button>
           </div>
         )}
-      </Card>
 
-      {cfStatus?.installed && !tunnelStatus?.configured && !setupMode && (
-        <Card>
-          <button
-            onClick={() => setSetupMode(true)}
-            className="w-full py-2 px-4 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
-          >
-            Configure Tunnel
-          </button>
-        </Card>
-      )}
-
-      {setupMode && (
-        <Card>
-          <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-4">Setup Tunnel</h3>
+        {/* Custom domain form */}
+        {mode === "custom" && setupPhase === "idle" && (
           <div className="space-y-4">
+            <div>
+              <label htmlFor="tunnel-hostname" className="text-xs text-[var(--text-secondary)] block mb-1">
+                Hostname
+              </label>
+              <input
+                id="tunnel-hostname"
+                type="text"
+                value={customHostname}
+                onChange={(e) => setCustomHostname(e.target.value)}
+                placeholder="hub.yourdomain.com"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+              />
+            </div>
             <div>
               <label htmlFor="tunnel-token" className="text-xs text-[var(--text-secondary)] block mb-1">
                 Cloudflare API Token
@@ -305,108 +354,200 @@ function TunnelSection() {
                 type="password"
                 value={apiToken}
                 onChange={(e) => setApiToken(e.target.value)}
-                placeholder="Enter your CF API token"
+                placeholder="Enter your Cloudflare API token"
                 className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
               />
-            </div>
-            <div>
-              <label htmlFor="tunnel-name" className="text-xs text-[var(--text-secondary)] block mb-1">
-                Tunnel Name
-              </label>
-              <input
-                id="tunnel-name"
-                type="text"
-                value={tunnelName}
-                onChange={(e) => setTunnelName(e.target.value)}
-                placeholder="my-hub"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
-              />
-              {hostname && (
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  Hostname: <span className="text-primary-500 font-medium">{hostname}</span>
-                </p>
-              )}
-            </div>
-            <div>
-              <label htmlFor="tunnel-port" className="text-xs text-[var(--text-secondary)] block mb-1">
-                Local Port
-              </label>
-              <input
-                id="tunnel-port"
-                type="number"
-                value={localPort}
-                onChange={(e) => setLocalPort(parseInt(e.target.value) || 9090)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
-              />
+              <p className="text-xs text-[var(--text-muted)] mt-1">
+                Needs Account, Tunnel, and DNS permissions
+              </p>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={handleSetup}
-                disabled={actionLoading || !apiToken || !tunnelName}
-                className="flex-1 py-2 px-4 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
-              >
-                {actionLoading ? "Setting up..." : "Create Tunnel"}
-              </button>
-              <button
-                onClick={() => setSetupMode(false)}
+                onClick={() => setMode("choose")}
                 className="py-2 px-4 rounded-lg border border-[var(--border-color)] text-sm text-[var(--text-secondary)] hover:bg-surface-100 dark:hover:bg-surface-800"
               >
-                Cancel
+                Back
+              </button>
+              <button
+                onClick={handleCustomConnect}
+                disabled={!apiToken || !customHostname}
+                className="flex-1 py-2.5 px-4 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
+              >
+                Connect
               </button>
             </div>
           </div>
-        </Card>
-      )}
+        )}
 
-      {tunnelStatus?.configured && tunnelStatus.config && (
-        <Card>
-          <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Tunnel Status</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-[var(--text-secondary)]">Status</span>
-              <span className={`font-medium ${tunnelStatus.running ? "text-accent-500" : "text-[var(--text-muted)]"}`}>
-                {tunnelStatus.running ? "Running" : "Stopped"}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--text-secondary)]">Hostname</span>
-              <a
-                href={`https://${tunnelStatus.config.hostname}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary-500 flex items-center gap-1 hover:underline"
+        {/* Progress steps (both modes) */}
+        {setupPhase !== "idle" && (
+          <div className="space-y-3">
+            {steps.map((step) => (
+              <div
+                key={step.label}
+                className="flex items-center gap-3 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)]"
               >
-                {tunnelStatus.config.hostname}
-                <Link className="w-3 h-3" />
-              </a>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-[var(--text-secondary)]">Local Port</span>
-              <span className="text-[var(--text-primary)] font-medium">{tunnelStatus.config.local_port}</span>
-            </div>
-          </div>
-          <div className="flex gap-2 mt-4">
-            {!tunnelStatus.running ? (
+                <div className="flex-1">
+                  <span className="text-sm text-[var(--text-primary)] block">{step.label}</span>
+                  {step.status === "failed" && step.error && (
+                    <span className="text-xs text-red-500 block mt-1">{step.error}</span>
+                  )}
+                </div>
+                {step.status === "pending" && (
+                  <div className="w-5 h-5 rounded-full border-2 border-surface-300 dark:border-surface-600" />
+                )}
+                {step.status === "running" && (
+                  <Loader2 className="w-5 h-5 text-primary-500 animate-spin" />
+                )}
+                {step.status === "done" && (
+                  <CheckCircle2 className="w-5 h-5 text-accent-500" />
+                )}
+                {step.status === "failed" && (
+                  <AlertCircle className="w-5 h-5 text-red-500" />
+                )}
+              </div>
+            ))}
+
+            {setupPhase === "done" && publicUrl && (
+              <div className="flex flex-col items-center gap-2 py-3">
+                <CheckCircle2 className="w-8 h-8 text-accent-500" />
+                <p className="text-sm text-[var(--text-primary)] font-medium">Hub is live!</p>
+                <a
+                  href={publicUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-500 text-sm font-medium flex items-center gap-1 hover:underline"
+                >
+                  {publicUrl.replace("https://", "")}
+                  <Link className="w-3 h-3" />
+                </a>
+              </div>
+            )}
+
+            {setupPhase === "error" && (
               <button
-                onClick={handleStart}
-                disabled={actionLoading}
-                className="flex-1 py-2 px-4 rounded-lg bg-accent-500 text-white text-sm font-medium hover:bg-accent-600 transition-colors disabled:opacity-50"
+                onClick={() => { setSetupPhase("idle"); setMode("choose"); }}
+                className="w-full py-2 px-4 rounded-lg border border-[var(--border-color)] text-sm text-[var(--text-secondary)] hover:bg-surface-100 dark:hover:bg-surface-800"
               >
-                Start Tunnel
-              </button>
-            ) : (
-              <button
-                onClick={handleStop}
-                disabled={actionLoading}
-                className="flex-1 py-2 px-4 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
-              >
-                Stop Tunnel
+                Try Again
               </button>
             )}
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
     </div>
+  );
+}
+
+// --- Users Section ---
+
+function UsersSection() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    CitinetAPI.listUsers()
+      .then((u) => { setUsers(u); setLoading(false); })
+      .catch((e) => { setError(String(e)); setLoading(false); });
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleToggleAdmin = async (user: User) => {
+    try {
+      await CitinetAPI.updateUserRole(user.user_id, !user.is_admin);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleDelete = async (user: User) => {
+    if (!confirm(`Remove user "${user.username}"? Their files will be deleted.`)) return;
+    try {
+      await CitinetAPI.deleteUser(user.user_id);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+          <span className="text-sm text-[var(--text-secondary)]">Loading users...</span>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-4">
+        <Users className="w-5 h-5 text-primary-500" />
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">Users</h3>
+        <span className="text-xs text-[var(--text-muted)] ml-auto">{users.length} total</span>
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 mb-3">
+          <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-500">{error}</p>
+        </div>
+      )}
+
+      {users.length === 0 ? (
+        <p className="text-sm text-[var(--text-muted)] text-center py-4">No users yet</p>
+      ) : (
+        <div className="divide-y divide-[var(--border-color)]">
+          {users.map((user) => (
+            <div key={user.user_id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+              <div className="w-8 h-8 rounded-full bg-primary-500/10 flex items-center justify-center shrink-0">
+                <span className="text-sm font-medium text-primary-500">
+                  {user.username.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[var(--text-primary)] truncate">
+                    {user.username}
+                  </span>
+                  {user.is_admin && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-500/20 text-accent-500 font-medium shrink-0">
+                      Admin
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-[var(--text-muted)] truncate block">{user.email}</span>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => handleToggleAdmin(user)}
+                  className="p-1.5 rounded-md hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                  title={user.is_admin ? "Remove admin" : "Make admin"}
+                >
+                  {user.is_admin ? (
+                    <ShieldOff className="w-4 h-4 text-[var(--text-muted)]" />
+                  ) : (
+                    <Shield className="w-4 h-4 text-[var(--text-muted)]" />
+                  )}
+                </button>
+                <button
+                  onClick={() => handleDelete(user)}
+                  className="p-1.5 rounded-md hover:bg-red-500/10 transition-colors"
+                  title="Remove user"
+                >
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -416,7 +557,7 @@ export function AdminPanel() {
   return (
     <div className="max-w-2xl space-y-6">
       <h2 className="text-xl font-bold text-[var(--text-primary)]">Admin Panel</h2>
-      <DockerSection />
+      <UsersSection />
       <TunnelSection />
     </div>
   );

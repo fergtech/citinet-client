@@ -1,8 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type NodeType = 'hub' | 'client' | 'personal';
-
 export interface ResourceContribution {
   diskSpaceGB: number;
   bandwidthMbps: number;
@@ -10,7 +8,6 @@ export interface ResourceContribution {
 }
 
 export interface NodeConfig {
-  nodeType: NodeType;
   nodeName: string;
   installPath: string;
   autoStart: boolean;
@@ -19,7 +16,7 @@ export interface NodeConfig {
 }
 
 interface ConfigState extends NodeConfig {
-  setNodeType: (type: NodeType) => void;
+  nodeType: 'hub'; // Read-only, always hub for now
   setNodeName: (name: string) => void;
   setInstallPath: (path: string) => void;
   setAutoStart: (enabled: boolean) => void;
@@ -29,9 +26,8 @@ interface ConfigState extends NodeConfig {
 }
 
 const defaultConfig: NodeConfig = {
-  nodeType: 'client',
   nodeName: '',
-  installPath: 'C:\\Program Files\\Citinet',
+  installPath: '',  // Will be set during installation
   autoStart: true,
   contribution: {
     diskSpaceGB: 10,
@@ -45,7 +41,7 @@ export const useConfigStore = create<ConfigState>()(
   persist(
     (set) => ({
       ...defaultConfig,
-      setNodeType: (nodeType) => set({ nodeType }),
+      nodeType: 'hub' as const,
       setNodeName: (nodeName) => set({ nodeName }),
       setInstallPath: (installPath) => set({ installPath }),
       setAutoStart: (autoStart) => set({ autoStart }),

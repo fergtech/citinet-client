@@ -1,9 +1,56 @@
+import { useState, useEffect } from "react";
 import { useWizardStore } from "../../stores/wizardStore";
 import { Button } from "../ui/Button";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, AlertCircle, CheckCircle2 } from "lucide-react";
+import { CitinetAPI } from "../../api/tauri";
 
 export function LocationStep() {
   const { installPath, setInstallPath, nextStep, prevStep } = useWizardStore();
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationSuccess, setValidationSuccess] = useState(false);
+
+  // Load recommended path on mount
+  useEffect(() => {
+    const loadRecommendedPath = async () => {
+      try {
+        const recommended = await CitinetAPI.getRecommendedInstallPath();
+        if (!installPath || installPath === "C:\\Program Files\\Citinet") {
+          setInstallPath(recommended);
+        }
+      } catch (err) {
+        console.error("Failed to get recommended path:", err);
+      }
+    };
+    loadRecommendedPath();
+  }, []);
+
+  // Validate path when it changes
+  useEffect(() => {
+    const validatePath = async () => {
+      if (!installPath) {
+        setValidationError(null);
+        setValidationSuccess(false);
+        return;
+      }
+
+      setValidating(true);
+      setValidationError(null);
+      setValidationSuccess(false);
+
+      try {
+        await CitinetAPI.validateInstallPath(installPath);
+        setValidationSuccess(true);
+      } catch (err) {
+        setValidationError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setValidating(false);
+      }
+    };
+
+    const timer = setTimeout(validatePath, 500);
+    return () => clearTimeout(timer);
+  }, [installPath]);
 
   const handleBrowse = () => {
     // In production, the Tauri dialog plugin would handle this.
@@ -13,6 +60,8 @@ export function LocationStep() {
       setInstallPath(path);
     }
   };
+
+  const canContinue = installPath && validationSuccess && !validating;
 
   return (
     <div>
@@ -37,15 +86,39 @@ export function LocationStep() {
         </Button>
       </div>
 
+      {validating && (
+        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)] mb-4">
+          <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          <span>Validating path...</span>
+        </div>
+      )}
+
+      {validationSuccess && !validating && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 mb-4">
+          <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+          <p className="text-sm text-green-600 dark:text-green-400">Path is valid and writable</p>
+        </div>
+      )}
+
+      {validationError && !validating && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 mb-4">
+          <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">Invalid Path</p>
+            <p className="text-xs text-red-600/80 dark:text-red-400/80 mt-1">{validationError}</p>
+          </div>
+        </div>
+      )}
+
       <p className="text-xs text-[var(--text-muted)] mb-8">
-        Approximately 50 MB required for base installation.
+        Approximately 50 MB required for base installation. The default location uses your user AppData folder, which doesn't require administrator privileges.
       </p>
 
       <div className="flex gap-3">
         <Button variant="secondary" onClick={prevStep} className="flex-1">
           Back
         </Button>
-        <Button onClick={nextStep} disabled={!installPath} className="flex-1">
+        <Button onClick={nextStep} disabled={!canContinue} className="flex-1">
           Continue
         </Button>
       </div>

@@ -1,10 +1,12 @@
-import { useOnboardingStore } from "../../stores/onboardingStore";
+import { useWizardStore } from "../../stores/wizardStore";
+import { useConfigStore } from "../../stores/configStore";
 import { Button } from "../ui/Button";
 import { HardDrive } from "lucide-react";
 
 export function ContributionSlider() {
   const { storageContribution, setStorageContribution, nextStep, prevStep } =
-    useOnboardingStore();
+    useWizardStore();
+  const setContribution = useConfigStore((s) => s.setContribution);
 
   return (
     <div>
@@ -27,14 +29,18 @@ export function ContributionSlider() {
         </span>
       </div>
 
-      <label htmlFor="onboarding-storage" className="sr-only">Storage contribution</label>
+      <label htmlFor="wizard-storage" className="sr-only">Storage contribution</label>
       <input
-        id="onboarding-storage"
+        id="wizard-storage"
         type="range"
         min={1}
         max={50}
         value={storageContribution}
-        onChange={(e) => setStorageContribution(Number(e.target.value))}
+        onChange={(e) => {
+          const val = Number(e.target.value);
+          setStorageContribution(val);
+          setContribution({ diskSpaceGB: val });
+        }}
         className="w-full mb-2 accent-primary-500"
       />
       <div className="flex justify-between text-xs text-[var(--text-muted)] mb-6">

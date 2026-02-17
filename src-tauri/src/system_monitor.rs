@@ -160,3 +160,35 @@ impl Default for SystemMonitor {
         Self::new()
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriveSpace {
+    pub total_gb: f64,
+    pub available_gb: f64,
+}
+
+/// Get disk space for the drive containing the given path.
+/// On Windows, matches by drive letter (e.g., C:\). On Unix, finds longest mount prefix.
+pub fn get_drive_space_for_path(path: &std::path::Path) -> Result<DriveSpace, String> {
+    let disks = Disks::new_with_refreshed_list();
+    let path_str = path.to_string_lossy().to_lowercase();
+
+    let mut best_match: Option<&sysinfo::Disk> = None;
+    let mut best_len = 0;
+
+    for disk in disks.list() {
+        let mount = disk.mount_point().to_string_lossy().to_lowercase();
+        if path_str.starts_with(&mount) && mount.len() > best_len {
+            best_len = mount.len();
+            best_match = Some(disk);
+        }
+    }
+
+    match best_match {
+        Some(disk) => Ok(DriveSpace {
+            total_gb: disk.total_space() as f64 / 1_073_741_824.0,
+            available_gb: disk.available_space() as f64 / 1_073_741_824.0,
+        }),
+        None => Err("Could not find drive for path".to_string()),
+    }
+}

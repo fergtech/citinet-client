@@ -1,23 +1,21 @@
 mod system_monitor;
-mod hub_service;
 mod storage_manager;
-mod docker_manager;
 mod tunnel_manager;
+mod hub_api;
+mod auth;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{Manager, State};
-use system_monitor::{SystemMetrics, SystemMonitor, HardwareInfo};
-use hub_service::{HubService, HubNode, HubServiceInfo};
-use storage_manager::{StorageManager, NodeConfig, StorageStatus, NodeStatus};
+use system_monitor::{SystemMetrics, SystemMonitor, HardwareInfo, DriveSpace};
+use storage_manager::{StorageManager, NodeConfig, StorageStatus, NodeStatus, File, User};
 use tunnel_manager::TunnelManager;
 
-// Application state
+// Application state — Arc-wrapped so it can be shared with the axum API server
 struct AppState {
-    monitor: Mutex<SystemMonitor>,
-    hub_service: Mutex<HubService>,
-    storage_manager: Mutex<Option<StorageManager>>,
-    tunnel_manager: Mutex<Option<TunnelManager>>,
+    monitor: Arc<Mutex<SystemMonitor>>,
+    storage_manager: Arc<Mutex<Option<StorageManager>>>,
+    tunnel_manager: Arc<Mutex<Option<TunnelManager>>>,
     started_at: Instant,
 }
 
@@ -39,33 +37,35 @@ fn greet(name: String) -> String {
 }
 
 #[tauri::command]
-fn start_hub_broadcasting(state: State<AppState>, node_name: String, services: Vec<String>) -> Result<(), String> {
-    let mut hub_service = state.hub_service.lock().map_err(|e| e.to_string())?;
-    hub_service.start_broadcasting(node_name, services)
+fn get_recommended_install_path(app: tauri::AppHandle) -> Result<String, String> {
+    let app_data_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+    
+    // Ensure the directory exists
+    std::fs::create_dir_all(&app_data_dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+    
+    Ok(app_data_dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-fn stop_hub_broadcasting(state: State<AppState>) -> Result<(), String> {
-    let mut hub_service = state.hub_service.lock().map_err(|e| e.to_string())?;
-    hub_service.stop_broadcasting()
-}
-
-#[tauri::command]
-fn start_node_discovery(state: State<AppState>) -> Result<(), String> {
-    let mut hub_service = state.hub_service.lock().map_err(|e| e.to_string())?;
-    hub_service.start_discovery()
-}
-
-#[tauri::command]
-fn get_discovered_nodes(state: State<AppState>) -> Result<Vec<HubNode>, String> {
-    let hub_service = state.hub_service.lock().map_err(|e| e.to_string())?;
-    hub_service.get_discovered_nodes()
-}
-
-#[tauri::command]
-fn get_hub_service_info(state: State<AppState>) -> Result<HubServiceInfo, String> {
-    let hub_service = state.hub_service.lock().map_err(|e| e.to_string())?;
-    hub_service.get_service_info()
+fn validate_install_path(path: String) -> Result<bool, String> {
+    use std::path::Path;
+    use std::fs;
+    
+    let path_obj = Path::new(&path);
+    
+    // Try to create the directory to test write permissions
+    match fs::create_dir_all(&path_obj) {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                Err(format!("Permission denied: Cannot write to '{}'. Please choose a different location or run as administrator.", path))
+            } else {
+                Err(format!("Cannot create directory: {}", e))
+            }
+        }
+    }
 }
 
 // --- Storage/Node commands ---
@@ -164,38 +164,167 @@ fn get_node_status(state: State<AppState>) -> Result<Option<NodeStatus>, String>
     }
 }
 
-// --- Docker commands ---
-
 #[tauri::command]
-fn check_docker() -> docker_manager::DockerStatus {
-    docker_manager::check_docker()
+fn get_install_drive_space(state: State<AppState>) -> Result<DriveSpace, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => system_monitor::get_drive_space_for_path(sm.install_path()),
+        None => Err("Node not initialized".to_string()),
+    }
 }
 
 #[tauri::command]
-fn list_docker_containers() -> Result<Vec<docker_manager::DockerContainer>, String> {
-    docker_manager::list_containers()
+fn create_admin_user(
+    state: State<AppState>,
+    username: String,
+    email: String,
+    password: String,
+) -> Result<User, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => {
+            // Hash password
+            let password_hash = auth::hash_password(&password).map_err(|e| e.to_string())?;
+            // Create admin user (is_admin=true)
+            sm.create_user(&username, &email, &password_hash, true)
+                .map_err(|e| e.to_string())
+        }
+        None => Err("Node not initialized".to_string()),
+    }
 }
 
 #[tauri::command]
-fn start_docker_container(id: String) -> Result<(), String> {
-    docker_manager::start_container(&id)
+fn login_user(state: State<AppState>, username: String, password: String) -> Result<User, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    let sm = sm_lock.as_ref().ok_or("Node not initialized".to_string())?;
+
+    let user = sm.get_user_by_username(&username)
+        .map_err(|e| e.to_string())?
+        .ok_or("Invalid credentials".to_string())?;
+
+    let hash = sm.get_password_hash(&username)
+        .map_err(|e| e.to_string())?
+        .ok_or("Invalid credentials".to_string())?;
+
+    let valid = auth::verify_password(&password, &hash).map_err(|e| e.to_string())?;
+    if !valid {
+        return Err("Invalid credentials".to_string());
+    }
+
+    Ok(user)
 }
 
 #[tauri::command]
-fn stop_docker_container(id: String) -> Result<(), String> {
-    docker_manager::stop_container(&id)
+fn list_users(state: State<AppState>) -> Result<Vec<User>, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => sm.list_users().map_err(|e| e.to_string()),
+        None => Err("Node not initialized".to_string()),
+    }
 }
 
 #[tauri::command]
-fn restart_docker_container(id: String) -> Result<(), String> {
-    docker_manager::restart_container(&id)
+fn delete_user(state: State<AppState>, user_id: String) -> Result<(), String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => sm.delete_user(&user_id).map_err(|e| e.to_string()),
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+fn update_user_role(state: State<AppState>, user_id: String, is_admin: bool) -> Result<(), String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => sm.update_user_role(&user_id, is_admin).map_err(|e| e.to_string()),
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+// --- File commands ---
+
+#[tauri::command]
+fn upload_file(state: State<AppState>, file_name: String, file_data: Vec<u8>) -> Result<File, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => {
+            // Get admin user for desktop operations
+            let admin = sm.get_first_admin().map_err(|e| e.to_string())?
+                .ok_or("No admin user found")?;
+            // Desktop uploads default to public
+            sm.upload_file(&admin.user_id, &file_name, &file_data, true).map_err(|e| e.to_string())
+        },
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+fn list_files(state: State<AppState>) -> Result<Vec<File>, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        // Desktop admin can see all files
+        Some(sm) => sm.list_all_files().map_err(|e| e.to_string()),
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+fn delete_file(state: State<AppState>, file_name: String) -> Result<(), String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => {
+            // Get admin user for desktop operations
+            let admin = sm.get_first_admin().map_err(|e| e.to_string())?
+                .ok_or("No admin user found")?;
+            sm.delete_file(&admin.user_id, &file_name).map_err(|e| e.to_string())
+        },
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+fn read_file(state: State<AppState>, file_name: String) -> Result<Vec<u8>, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => {
+            // Get admin user for desktop operations
+            let admin = sm.get_first_admin().map_err(|e| e.to_string())?
+                .ok_or("No admin user found")?;
+            sm.read_file(&admin.user_id, &file_name).map_err(|e| e.to_string())
+        },
+        None => Err("Node not initialized".to_string()),
+    }
 }
 
 // --- Tunnel commands ---
 
 #[tauri::command]
-fn check_cloudflared() -> tunnel_manager::CloudflaredStatus {
-    tunnel_manager::check_cloudflared()
+fn start_quick_tunnel(state: State<AppState>, local_port: u16) -> Result<String, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+
+    let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+    let tm = tm_lock.get_or_insert_with(|| TunnelManager::new(sm.install_path()));
+
+    tm.start_quick_tunnel(local_port).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn install_cloudflared(state: State<AppState>) -> Result<String, String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+
+    let install_path = sm.install_path();
+    tunnel_manager::install_cloudflared(install_path)
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn check_cloudflared(state: State<AppState>) -> tunnel_manager::CloudflaredStatus {
+    let install_path = state.storage_manager.lock().ok()
+        .and_then(|sm| sm.as_ref().map(|s| s.install_path().to_path_buf()));
+    tunnel_manager::check_cloudflared(install_path.as_deref())
 }
 
 #[tauri::command]
@@ -250,40 +379,52 @@ fn get_tunnel_status(state: State<AppState>) -> Result<tunnel_manager::TunnelSta
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let started_at = Instant::now();
+    let storage_manager = Arc::new(Mutex::new(None::<StorageManager>));
+    let tunnel_manager = Arc::new(Mutex::new(None::<TunnelManager>));
+    let monitor = Arc::new(Mutex::new(SystemMonitor::new()));
+
+    // Clone Arcs for the API server
+    let api_sm = storage_manager.clone();
+    let api_tm = tunnel_manager.clone();
+
     tauri::Builder::default()
         .manage(AppState {
-            monitor: Mutex::new(SystemMonitor::new()),
-            hub_service: Mutex::new(HubService::new().expect("Failed to create HubService")),
-            storage_manager: Mutex::new(None),
-            tunnel_manager: Mutex::new(None),
-            started_at: Instant::now(),
+            monitor,
+            storage_manager,
+            tunnel_manager,
+            started_at,
         })
         .invoke_handler(tauri::generate_handler![
             get_system_metrics,
             get_hardware_info,
-            start_hub_broadcasting,
-            stop_hub_broadcasting,
-            start_node_discovery,
-            get_discovered_nodes,
-            get_hub_service_info,
+            get_install_drive_space,
             greet,
+            get_recommended_install_path,
+            validate_install_path,
             initialize_node,
             get_node_config,
             update_resource_limits,
             get_storage_status,
             get_node_status,
-            check_docker,
-            list_docker_containers,
-            start_docker_container,
-            stop_docker_container,
-            restart_docker_container,
+            create_admin_user,
+            login_user,
+            list_users,
+            delete_user,
+            update_user_role,
+            upload_file,
+            list_files,
+            delete_file,
+            read_file,
+            start_quick_tunnel,
+            install_cloudflared,
             check_cloudflared,
             setup_tunnel,
             start_tunnel,
             stop_tunnel,
             get_tunnel_status
         ])
-        .setup(|app| {
+        .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -299,29 +440,52 @@ pub fn run() {
                 if marker_path.exists() {
                     if let Ok(install_path) = std::fs::read_to_string(&marker_path) {
                         let install_path = install_path.trim().to_string();
-                        let db_path = std::path::Path::new(&install_path)
-                            .join("config")
-                            .join("citinet.db");
-                        if db_path.exists() {
-                            if let Ok(sm) = StorageManager::open(&install_path) {
-                                let install = std::path::PathBuf::from(&install_path);
-                                let tm = TunnelManager::new(&install);
-                                {
-                                    let app_state = app.state::<AppState>();
-                                    let mut sm_lock = app_state.storage_manager.lock().unwrap();
-                                    *sm_lock = Some(sm);
+                        
+                        // Skip auto-loading if path is in Program Files (requires admin)
+                        let is_program_files = install_path.to_lowercase().contains("program files");
+                        if is_program_files {
+                            log::warn!("Skipping auto-load from restricted path: {}", install_path);
+                            log::info!("Please complete the installation wizard to set a new path");
+                        } else {
+                            let db_path = std::path::Path::new(&install_path)
+                                .join("config")
+                                .join("citinet.db");
+                            if db_path.exists() {
+                                if let Ok(sm) = StorageManager::open(&install_path) {
+                                    let install = std::path::PathBuf::from(&install_path);
+                                    let tm = TunnelManager::new(&install);
+                                    {
+                                        let app_state = app.state::<AppState>();
+                                        let mut sm_lock = app_state.storage_manager.lock().unwrap();
+                                        *sm_lock = Some(sm);
+                                    }
+                                    {
+                                        let app_state = app.state::<AppState>();
+                                        let mut tm_lock = app_state.tunnel_manager.lock().unwrap();
+                                        *tm_lock = Some(tm);
+                                    }
+                                    log::info!("Auto-opened StorageManager at {}", install_path);
                                 }
-                                {
-                                    let app_state = app.state::<AppState>();
-                                    let mut tm_lock = app_state.tunnel_manager.lock().unwrap();
-                                    *tm_lock = Some(tm);
-                                }
-                                log::info!("Auto-opened StorageManager at {}", install_path);
                             }
                         }
                     }
                 }
             }
+
+            // Spawn the Hub HTTP API server on port 9090
+            let api_state = hub_api::ApiState {
+                storage_manager: api_sm,
+                tunnel_manager: api_tm,
+                started_at,
+            };
+
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = hub_api::start_hub_api(api_state, 9090).await {
+                    log::error!("Hub API server failed: {}", e);
+                }
+            });
+
+            log::info!("Hub API server starting on port 9090");
 
             Ok(())
         })

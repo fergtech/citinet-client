@@ -22,21 +22,9 @@ export interface HardwareInfo {
   is_raspberry_pi: boolean;
 }
 
-export interface HubNode {
-  id: string;
-  name: string;
-  addresses: string[];
-  port: number;
-  node_type: string;
-  services: string[];
-  last_seen: number;
-}
-
-export interface HubServiceInfo {
-  service_name: string;
-  port: number;
-  services: string[];
-  is_running: boolean;
+export interface DriveSpace {
+  total_gb: number;
+  available_gb: number;
 }
 
 // --- Node/Storage types ---
@@ -70,23 +58,22 @@ export interface NodeStatus {
   online: boolean;
 }
 
-// --- Docker types ---
-
-export interface DockerStatus {
-  installed: boolean;
-  running: boolean;
-  version: string | null;
-  error: string | null;
+export interface FileInfo {
+  file_id: string;
+  user_id: string;
+  file_name: string;
+  size_bytes: number;
+  is_public: boolean;
+  created_at: string;
 }
 
-export interface DockerContainer {
-  id: string;
-  names: string;
-  image: string;
-  status: string;
-  state: string;
-  ports: string;
-  created: string;
+export interface User {
+  user_id: string;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- Tunnel types ---
@@ -103,6 +90,8 @@ export interface TunnelConfig {
   hostname: string;
   local_port: number;
   created_at: string;
+  mode: string;
+  tunnel_token: string;
 }
 
 export interface TunnelStatus {
@@ -121,34 +110,20 @@ export class CitinetAPI {
     return await invoke<HardwareInfo>("get_hardware_info");
   }
 
-  static async startHubBroadcasting(
-    nodeName: string,
-    services: string[]
-  ): Promise<void> {
-    return await invoke("start_hub_broadcasting", {
-      nodeName,
-      services,
-    });
-  }
-
-  static async stopHubBroadcasting(): Promise<void> {
-    return await invoke("stop_hub_broadcasting");
-  }
-
-  static async startNodeDiscovery(): Promise<void> {
-    return await invoke("start_node_discovery");
-  }
-
-  static async getDiscoveredNodes(): Promise<HubNode[]> {
-    return await invoke<HubNode[]>("get_discovered_nodes");
-  }
-
-  static async getHubServiceInfo(): Promise<HubServiceInfo> {
-    return await invoke<HubServiceInfo>("get_hub_service_info");
+  static async getInstallDriveSpace(): Promise<DriveSpace> {
+    return await invoke<DriveSpace>("get_install_drive_space");
   }
 
   static async greet(name: string): Promise<string> {
     return await invoke<string>("greet", { name });
+  }
+
+  static async getRecommendedInstallPath(): Promise<string> {
+    return await invoke<string>("get_recommended_install_path");
+  }
+
+  static async validateInstallPath(path: string): Promise<boolean> {
+    return await invoke<boolean>("validate_install_path", { path });
   }
 
   // --- Node/Storage commands ---
@@ -190,29 +165,63 @@ export class CitinetAPI {
     return await invoke<NodeStatus | null>("get_node_status");
   }
 
-  // --- Docker commands ---
-
-  static async checkDocker(): Promise<DockerStatus> {
-    return await invoke<DockerStatus>("check_docker");
+  static async createAdminUser(
+    username: string,
+    email: string,
+    password: string,
+  ): Promise<User> {
+    return await invoke<User>("create_admin_user", {
+      username, email, password,
+    });
   }
 
-  static async listDockerContainers(): Promise<DockerContainer[]> {
-    return await invoke<DockerContainer[]>("list_docker_containers");
+  static async loginUser(username: string, password: string): Promise<User> {
+    return await invoke<User>("login_user", { username, password });
   }
 
-  static async startDockerContainer(id: string): Promise<void> {
-    return await invoke("start_docker_container", { id });
+  static async listUsers(): Promise<User[]> {
+    return await invoke<User[]>("list_users");
   }
 
-  static async stopDockerContainer(id: string): Promise<void> {
-    return await invoke("stop_docker_container", { id });
+  static async deleteUser(userId: string): Promise<void> {
+    return await invoke("delete_user", { userId });
   }
 
-  static async restartDockerContainer(id: string): Promise<void> {
-    return await invoke("restart_docker_container", { id });
+  static async updateUserRole(userId: string, isAdmin: boolean): Promise<void> {
+    return await invoke("update_user_role", { userId, isAdmin });
+  }
+
+  // --- File operations ---
+
+  static async listFiles(): Promise<FileInfo[]> {
+    return await invoke<FileInfo[]>("list_files");
+  }
+
+  static async uploadFile(fileName: string, fileData: Uint8Array): Promise<void> {
+    return await invoke("upload_file", {
+      fileName,
+      fileData: Array.from(fileData),
+    });
+  }
+
+  static async deleteFile(fileName: string): Promise<void> {
+    return await invoke("delete_file", { fileName });
+  }
+
+  static async readFile(fileName: string): Promise<Uint8Array> {
+    const data = await invoke<number[]>("read_file", { fileName });
+    return new Uint8Array(data);
   }
 
   // --- Tunnel commands ---
+
+  static async startQuickTunnel(localPort: number): Promise<string> {
+    return await invoke<string>("start_quick_tunnel", { localPort });
+  }
+
+  static async installCloudflared(): Promise<string> {
+    return await invoke<string>("install_cloudflared");
+  }
 
   static async checkCloudflared(): Promise<CloudflaredStatus> {
     return await invoke<CloudflaredStatus>("check_cloudflared");

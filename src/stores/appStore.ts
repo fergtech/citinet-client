@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type AppPhase = "wizard" | "onboarding" | "dashboard";
+export type AppPhase = "wizard" | "login" | "dashboard";
 export type ThemeMode = "light" | "dark" | "system";
 
 interface AppState {

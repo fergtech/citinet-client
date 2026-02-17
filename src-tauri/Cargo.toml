@@ -29,3 +29,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 anyhow = "1.0"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+zip = "0.6"
+base64 = "0.22"
+axum = { version = "0.8", features = ["multipart"] }
+tower-http = { version = "0.6", features = ["cors"] }
+bcrypt = "0.15"
+jsonwebtoken = "9"
+tower = "0.5"

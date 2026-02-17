@@ -2,12 +2,18 @@ import React from "react";
 import { useWizardStore } from "../../stores/wizardStore";
 import { Cloud } from "lucide-react";
 
+const TOTAL_STEPS = 10;
+
 const STEP_LABELS = [
   "Welcome",
   "License",
+  "Identity",
   "Location",
+  "Contribute",
   "Service",
+  "Admin",
   "Installing",
+  "Tunnel",
   "Complete",
 ];
 
@@ -17,60 +23,62 @@ interface WizardLayoutProps {
 
 export function WizardLayout({ children }: WizardLayoutProps) {
   const currentStep = useWizardStore((s) => s.currentStep);
+  const progress = (currentStep / (TOTAL_STEPS - 1)) * 100;
+  const isBookend = currentStep === 0 || currentStep === TOTAL_STEPS - 1;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--bg-primary)] p-8">
-      <div className="w-full max-w-lg">
-        {/* Logo */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <Cloud className="w-8 h-8 text-primary-500" />
-          <span className="text-2xl font-bold text-[var(--text-primary)]">
-            CitiNet
-          </span>
-        </div>
+    <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
+      {/* Top bar: progress + step info */}
+      {!isBookend && (
+        <div className="shrink-0">
+          {/* Thin progress bar */}
+          <div className="h-1 bg-surface-200 dark:bg-surface-800">
+            <div
+              className="h-full bg-primary-500 transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
 
-        {/* Step indicator */}
-        <div className="flex items-center justify-between mb-8 px-4">
-          {STEP_LABELS.map((label, i) => (
-            <div key={label} className="flex items-center">
-              <div className="flex flex-col items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300 ${
-                    i < currentStep
-                      ? "bg-accent-500 text-white"
-                      : i === currentStep
-                      ? "bg-primary-500 text-white ring-4 ring-primary-200 dark:ring-primary-800"
-                      : "bg-surface-200 dark:bg-surface-700 text-[var(--text-muted)]"
-                  }`}
-                >
-                  {i < currentStep ? "\u2713" : i + 1}
-                </div>
-                <span
-                  className={`text-[10px] mt-1 ${
-                    i === currentStep
-                      ? "text-primary-500 font-medium"
-                      : "text-[var(--text-muted)]"
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-              {i < STEP_LABELS.length - 1 && (
-                <div
-                  className={`w-6 h-0.5 mx-1 mt-[-12px] transition-colors duration-300 ${
-                    i < currentStep
-                      ? "bg-accent-500"
-                      : "bg-surface-200 dark:bg-surface-700"
-                  }`}
-                />
-              )}
+          {/* Step label bar */}
+          <div className="flex items-center justify-between px-6 py-3">
+            <div className="flex items-center gap-2">
+              <Cloud className="w-5 h-5 text-primary-500" />
+              <span className="text-sm font-semibold text-[var(--text-primary)]">
+                Citinet
+              </span>
             </div>
-          ))}
+            <span className="text-xs text-[var(--text-muted)]">
+              {STEP_LABELS[currentStep]}
+              <span className="ml-2 text-[var(--text-muted)]/60">
+                {currentStep + 1}/{TOTAL_STEPS}
+              </span>
+            </span>
+          </div>
         </div>
+      )}
 
-        {/* Content card */}
-        <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-lg transition-all duration-300">
-          {children}
+      {/* Content area */}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
+          {isBookend ? (
+            // Welcome & Complete: no card wrapper, more breathing room
+            <div>
+              {currentStep === 0 && (
+                <div className="flex items-center justify-center gap-2.5 mb-10">
+                  <Cloud className="w-9 h-9 text-primary-500" />
+                  <span className="text-2xl font-bold text-[var(--text-primary)]">
+                    Citinet
+                  </span>
+                </div>
+              )}
+              {children}
+            </div>
+          ) : (
+            // Middle steps: card wrapper
+            <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl p-8 shadow-lg">
+              {children}
+            </div>
+          )}
         </div>
       </div>
     </div>

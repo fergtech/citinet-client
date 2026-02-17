@@ -9,7 +9,7 @@ const INSTALL_STEPS = [
   "Creating directories...",
   "Initializing database...",
   "Saving node configuration...",
-  "Registering system service...",
+  "Creating admin account...",
   "Finalizing...",
 ];
 
@@ -33,9 +33,9 @@ export function ProgressStep() {
 
         const config = await CitinetAPI.initializeNode(
           wizardState.installPath,
-          wizardState.nodeType,
-          configState.nodeName || wizardState.nodeType + "-node",
-          configState.contribution.diskSpaceGB,
+          'hub',
+          wizardState.nodeName || "hub-node",
+          wizardState.storageContribution,
           configState.contribution.bandwidthMbps,
           configState.contribution.cpuPercent,
           wizardState.autoStart,
@@ -44,14 +44,23 @@ export function ProgressStep() {
         if (cancelled) return;
         setInstallProgress(60);
 
-        // Step 3: Registering service
-        await new Promise((r) => setTimeout(r, 300));
+        // Step 3: Create admin account
+        if (wizardState.adminUsername && wizardState.adminEmail && wizardState.adminPassword) {
+          const adminUser = await CitinetAPI.createAdminUser(
+            wizardState.adminUsername,
+            wizardState.adminEmail,
+            wizardState.adminPassword,
+          );
+          useWizardStore.setState({ createdUser: adminUser });
+        }
+
         if (cancelled) return;
         setInstallProgress(80);
 
         // Step 4: Finalizing — sync config store with backend result
-        configState.setNodeType(config.node_type as 'hub' | 'client' | 'personal');
+        configState.setNodeName(wizardState.nodeName || "hub-node");
         configState.setInstallPath(config.install_path);
+        configState.setContribution({ diskSpaceGB: wizardState.storageContribution });
         configState.setConfigured(true);
 
         if (cancelled) return;
