@@ -3,7 +3,6 @@ import {
   FolderOpen,
   Settings,
   HelpCircle,
-  Cloud,
   Shield,
   LogOut,
 } from "lucide-react";
@@ -53,7 +52,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     <aside className="w-56 h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col transition-colors duration-200">
       {/* Logo */}
       <div className="flex items-center gap-2 px-5 py-5 border-b border-[var(--border-color)]">
-        <Cloud className="w-6 h-6 text-primary-500" />
+        <img src="/logo.png" alt="Citinet" className="w-6 h-6" />
         <span className="text-lg font-bold text-[var(--text-primary)]">
           Citinet
         </span>

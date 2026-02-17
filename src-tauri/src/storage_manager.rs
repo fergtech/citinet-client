@@ -425,6 +425,23 @@ impl StorageManager {
         password_hash: &str,
         is_admin: bool,
     ) -> Result<User> {
+        // If user already exists, update their password and return them
+        if let Ok(Some(existing)) = self.get_user_by_username(username) {
+            let now = Utc::now().to_rfc3339();
+            self.db.execute(
+                "UPDATE users SET password_hash = ?1, email = ?2, is_admin = ?3, updated_at = ?4 WHERE user_id = ?5",
+                rusqlite::params![password_hash, email, is_admin as i32, now, existing.user_id],
+            ).context("Failed to update existing user")?;
+            return Ok(User {
+                user_id: existing.user_id,
+                username: existing.username,
+                email: email.to_string(),
+                is_admin,
+                created_at: existing.created_at,
+                updated_at: now,
+            });
+        }
+
         let user_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 

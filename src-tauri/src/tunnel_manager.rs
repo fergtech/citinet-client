@@ -411,32 +411,41 @@ impl TunnelManager {
         // Parse the public URL from stderr output
         // cloudflared prints something like: "your url is: https://xxx-yyy-zzz.trycloudflare.com"
         let stderr = child.stderr.take().context("No stderr from cloudflared")?;
-        let reader = BufReader::new(stderr);
+        let mut reader = BufReader::new(stderr);
 
         let mut public_url = String::new();
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(30);
 
-        for line in reader.lines() {
+        let mut line_buf = String::new();
+        loop {
             if start.elapsed() > timeout {
                 let _ = child.kill();
                 anyhow::bail!("Timed out waiting for quick tunnel URL");
             }
 
-            let line = line.context("Failed to read cloudflared output")?;
-            log::info!("cloudflared: {}", line);
+            line_buf.clear();
+            match reader.read_line(&mut line_buf) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let line = line_buf.trim();
+                    log::info!("cloudflared: {}", line);
 
-            // Look for the URL in various output formats
-            if let Some(url_start) = line.find("https://") {
-                let url_part = &line[url_start..];
-                if url_part.contains("trycloudflare.com") {
-                    // Extract just the URL (stop at whitespace or end)
-                    public_url = url_part
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or(url_part)
-                        .trim_end_matches('|')
-                        .to_string();
+                    if let Some(url_start) = line.find("https://") {
+                        let url_part = &line[url_start..];
+                        if url_part.contains("trycloudflare.com") {
+                            public_url = url_part
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or(url_part)
+                                .trim_end_matches('|')
+                                .to_string();
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Error reading cloudflared stderr: {}", e);
                     break;
                 }
             }
@@ -448,6 +457,19 @@ impl TunnelManager {
         }
 
         log::info!("Quick tunnel URL: {}", public_url);
+
+        // Keep draining stderr in a background thread so cloudflared
+        // doesn't die from a broken pipe on Windows
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match reader.read_line(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => log::debug!("cloudflared: {}", buf.trim()),
+                }
+            }
+        });
 
         // Extract hostname from URL
         let hostname = public_url
@@ -600,16 +622,86 @@ impl TunnelManager {
         let cloudflared_cmd = self.get_cloudflared_command();
 
         if config.mode == "quick" {
-            // Restart quick tunnel
+            // Restart quick tunnel — need to capture the new URL
             let url = format!("http://localhost:{}", config.local_port);
             log::info!("Restarting quick tunnel for {}", url);
 
-            let child = Command::new(&cloudflared_cmd)
+            let mut child = Command::new(&cloudflared_cmd)
                 .args(["tunnel", "--url", &url])
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .stdout(Stdio::null())
                 .spawn()
                 .context("Failed to spawn cloudflared quick tunnel")?;
+
+            let stderr = child.stderr.take().context("No stderr from cloudflared")?;
+            let mut reader = BufReader::new(stderr);
+
+            let mut new_hostname = String::new();
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(30);
+
+            let mut line_buf = String::new();
+            loop {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    anyhow::bail!("Timed out waiting for quick tunnel URL");
+                }
+
+                line_buf.clear();
+                match reader.read_line(&mut line_buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = line_buf.trim();
+                        log::info!("cloudflared: {}", line);
+
+                        if let Some(url_start) = line.find("https://") {
+                            let url_part = &line[url_start..];
+                            if url_part.contains("trycloudflare.com") {
+                                let public_url = url_part
+                                    .split_whitespace()
+                                    .next()
+                                    .unwrap_or(url_part)
+                                    .trim_end_matches('|')
+                                    .to_string();
+                                new_hostname = public_url
+                                    .trim_start_matches("https://")
+                                    .trim_end_matches('/')
+                                    .to_string();
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            // Drain stderr in background to keep cloudflared alive
+            std::thread::spawn(move || {
+                let mut buf = String::new();
+                loop {
+                    buf.clear();
+                    match reader.read_line(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => log::debug!("cloudflared: {}", buf.trim()),
+                    }
+                }
+            });
+
+            if !new_hostname.is_empty() {
+                log::info!("Quick tunnel restarted with new URL: {}", new_hostname);
+                // Update DB with new hostname
+                let now = chrono::Utc::now().to_rfc3339();
+                if let Ok(db) = rusqlite::Connection::open(&self.db_path) {
+                    let _ = db.execute(
+                        "UPDATE tunnel_config SET hostname = ?1, updated_at = ?2",
+                        rusqlite::params![new_hostname, now],
+                    );
+                }
+                // Update in-memory config
+                if let Some(ref mut cfg) = self.config {
+                    cfg.hostname = new_hostname;
+                }
+            }
 
             self.child = Some(child);
         } else if !config.tunnel_token.is_empty() {

@@ -25,18 +25,22 @@ export function WizardLayout({ children }: WizardLayoutProps) {
   const currentStep = useWizardStore((s) => s.currentStep);
   const progress = (currentStep / (TOTAL_STEPS - 1)) * 100;
   const isBookend = currentStep === 0 || currentStep === TOTAL_STEPS - 1;
+  const progressContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (progressContainerRef.current) {
+      progressContainerRef.current.style.setProperty('--progress-width', `${progress}%`);
+    }
+  }, [progress]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
       {/* Top bar: progress + step info */}
       {!isBookend && (
-        <div className="shrink-0">
+        <div className="shrink-0" ref={progressContainerRef}>
           {/* Thin progress bar */}
           <div className="h-1 bg-surface-200 dark:bg-surface-800">
-            <div
-              className="h-full bg-primary-500 transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
+            <div className="h-full bg-primary-500 transition-all duration-500 ease-out progress-bar" />
           </div>
 
           {/* Step label bar */}
