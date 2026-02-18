@@ -11,6 +11,7 @@ export interface NodeConfig {
   nodeName: string;
   installPath: string;
   autoStart: boolean;
+  backgroundMode: boolean;
   contribution: ResourceContribution;
   isConfigured: boolean;
 }
@@ -20,6 +21,7 @@ interface ConfigState extends NodeConfig {
   setNodeName: (name: string) => void;
   setInstallPath: (path: string) => void;
   setAutoStart: (enabled: boolean) => void;
+  setBackgroundMode: (enabled: boolean) => void;
   setContribution: (contribution: Partial<ResourceContribution>) => void;
   setConfigured: (configured: boolean) => void;
   reset: () => void;
@@ -29,6 +31,7 @@ const defaultConfig: NodeConfig = {
   nodeName: '',
   installPath: '',  // Will be set during installation
   autoStart: true,
+  backgroundMode: true,
   contribution: {
     diskSpaceGB: 10,
     bandwidthMbps: 5,
@@ -45,6 +48,7 @@ export const useConfigStore = create<ConfigState>()(
       setNodeName: (nodeName) => set({ nodeName }),
       setInstallPath: (installPath) => set({ installPath }),
       setAutoStart: (autoStart) => set({ autoStart }),
+      setBackgroundMode: (backgroundMode) => set({ backgroundMode }),
       setContribution: (contribution) =>
         set((state) => ({
           contribution: { ...state.contribution, ...contribution },

@@ -4,7 +4,7 @@ import { CitinetAPI, TunnelStatus, User } from "../../api/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
   Globe, Link, Loader2, CheckCircle2, AlertCircle, Copy, Check,
-  Users, Shield, ShieldOff, Trash2,
+  Users, Shield, ShieldOff, Trash2, Share2, Mail,
 } from "lucide-react";
 
 // --- Tunnel Section ---
@@ -38,6 +38,25 @@ function TunnelSection() {
 
   const nodeName = useConfigStore((s) => s.nodeName);
   const tunnelSlug = generateSlug(nodeName || "citinet-hub");
+
+  const shareUrl = async (url: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Citinet Hub", text: "Join my Citinet hub:", url });
+      } catch { /* user cancelled */ }
+    } else {
+      // Fallback: copy to clipboard
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const emailUrl = (url: string) => {
+    const subject = encodeURIComponent("Join my Citinet Hub");
+    const body = encodeURIComponent(`Hey,\n\nI'd like to invite you to join my Citinet hub. You can access it here:\n\n${url}\n\nSee you there!`);
+    window.open(`mailto:?subject=${subject}&body=${body}`, "_self");
+  };
 
   const refresh = useCallback(() => {
     CitinetAPI.getTunnelStatus().then((ts) => {
@@ -252,6 +271,20 @@ function TunnelSection() {
                   <Copy className="w-4 h-4 text-[var(--text-muted)]" />
                 )}
               </button>
+              <button
+                onClick={() => shareUrl(`https://${tunnelStatus.config!.hostname}`)}
+                className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors shrink-0"
+                title="Share link"
+              >
+                <Share2 className="w-4 h-4 text-[var(--text-muted)]" />
+              </button>
+              <button
+                onClick={() => emailUrl(`https://${tunnelStatus.config!.hostname}`)}
+                className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors shrink-0"
+                title="Email link"
+              >
+                <Mail className="w-4 h-4 text-[var(--text-muted)]" />
+              </button>
             </div>
           </div>
         </div>
@@ -421,6 +454,37 @@ function TunnelSection() {
                   {publicUrl.replace("https://", "")}
                   <Link className="w-3 h-3" />
                 </a>
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(publicUrl!);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }}
+                    className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors"
+                    title="Copy URL"
+                  >
+                    {copied ? (
+                      <Check className="w-4 h-4 text-accent-500" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-[var(--text-muted)]" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => shareUrl(publicUrl!)}
+                    className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors"
+                    title="Share link"
+                  >
+                    <Share2 className="w-4 h-4 text-[var(--text-muted)]" />
+                  </button>
+                  <button
+                    onClick={() => emailUrl(publicUrl!)}
+                    className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors"
+                    title="Email link"
+                  >
+                    <Mail className="w-4 h-4 text-[var(--text-muted)]" />
+                  </button>
+                </div>
               </div>
             )}
 

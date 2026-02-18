@@ -16,6 +16,7 @@ pub struct NodeConfig {
     pub bandwidth_limit_mbps: f64,
     pub cpu_limit_percent: f64,
     pub auto_start: bool,
+    pub background_mode: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -76,9 +77,142 @@ pub struct File {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Conversation {
+    pub conversation_id: String,
+    pub kind: String,
+    pub name: Option<String>,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationMember {
+    pub user_id: String,
+    pub username: String,
+    pub joined_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationWithMembers {
+    pub conversation: Conversation,
+    pub members: Vec<ConversationMember>,
+    pub last_message: Option<Message>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub message_id: String,
+    pub conversation_id: String,
+    pub sender_id: String,
+    pub sender_username: String,
+    pub body: String,
+    pub created_at: String,
+}
+
 pub struct StorageManager {
     db: Connection,
     install_path: PathBuf,
+}
+
+fn run_migrations(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS node_config (
+            node_id TEXT PRIMARY KEY,
+            node_type TEXT NOT NULL,
+            node_name TEXT NOT NULL,
+            install_path TEXT NOT NULL,
+            disk_quota_gb REAL NOT NULL,
+            bandwidth_limit_mbps REAL NOT NULL,
+            cpu_limit_percent REAL NOT NULL,
+            auto_start INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tunnel_config (
+            tunnel_id TEXT PRIMARY KEY,
+            tunnel_name TEXT NOT NULL,
+            hostname TEXT NOT NULL,
+            local_port INTEGER NOT NULL,
+            api_token TEXT NOT NULL,
+            credentials_path TEXT,
+            config_path TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS spaces (
+            space_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            storage_quota_gb REAL NOT NULL DEFAULT 5.0,
+            is_public INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_spaces_user_id ON spaces(user_id);
+        CREATE TABLE IF NOT EXISTS files (
+            file_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            is_public INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
+        CREATE INDEX IF NOT EXISTS idx_files_is_public ON files(is_public);
+        CREATE TABLE IF NOT EXISTS conversations (
+            conversation_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL DEFAULT 'dm',
+            name TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS conversation_members (
+            conversation_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (conversation_id, user_id),
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_conv_members_user ON conversation_members(user_id);
+        CREATE TABLE IF NOT EXISTS messages (
+            message_id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            sender_id TEXT NOT NULL,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+            FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);"
+    ).context("Failed to run schema migrations")?;
+
+    // Safe column addition — only runs if column doesn't exist yet
+    let has_bg_mode: bool = db.prepare("PRAGMA table_info(node_config)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|col| col.as_deref() == Ok("background_mode"));
+    if !has_bg_mode {
+        db.execute_batch(
+            "ALTER TABLE node_config ADD COLUMN background_mode INTEGER NOT NULL DEFAULT 1;"
+        ).context("Failed to add background_mode column")?;
+    }
+
+    Ok(())
 }
 
 impl StorageManager {
@@ -97,62 +231,7 @@ impl StorageManager {
         let db = Connection::open(&db_path)
             .with_context(|| format!("Failed to open SQLite database at '{}'. Check permissions.", db_path.display()))?;
 
-        db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS node_config (
-                node_id TEXT PRIMARY KEY,
-                node_type TEXT NOT NULL,
-                node_name TEXT NOT NULL,
-                install_path TEXT NOT NULL,
-                disk_quota_gb REAL NOT NULL,
-                bandwidth_limit_mbps REAL NOT NULL,
-                cpu_limit_percent REAL NOT NULL,
-                auto_start INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS tunnel_config (
-                tunnel_id TEXT PRIMARY KEY,
-                tunnel_name TEXT NOT NULL,
-                hostname TEXT NOT NULL,
-                local_port INTEGER NOT NULL,
-                api_token TEXT NOT NULL,
-                credentials_path TEXT,
-                config_path TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                is_admin INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS spaces (
-                space_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                storage_quota_gb REAL NOT NULL DEFAULT 5.0,
-                is_public INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_spaces_user_id ON spaces(user_id);
-            CREATE TABLE IF NOT EXISTS files (
-                file_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                file_name TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                is_public INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_files_user_id ON files(user_id);
-            CREATE INDEX IF NOT EXISTS idx_files_is_public ON files(is_public);"
-        ).context("Failed to run schema migrations")?;
+        run_migrations(&db)?;
 
         Ok(Self {
             db,
@@ -168,6 +247,7 @@ impl StorageManager {
         }
         let db = Connection::open(&db_path)
             .context("Failed to open SQLite database")?;
+        run_migrations(&db)?;
         Ok(Self {
             db,
             install_path: base.to_path_buf(),
@@ -190,12 +270,12 @@ impl StorageManager {
         self.db.execute(
             "INSERT OR REPLACE INTO node_config
                 (node_id, node_type, node_name, install_path, disk_quota_gb,
-                 bandwidth_limit_mbps, cpu_limit_percent, auto_start, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 bandwidth_limit_mbps, cpu_limit_percent, auto_start, background_mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 node_id, node_type, node_name, install_path,
                 disk_quota_gb, bandwidth_limit_mbps, cpu_limit_percent,
-                auto_start as i32, now, now
+                auto_start as i32, 1i32, now, now
             ],
         ).context("Failed to save node config")?;
 
@@ -208,6 +288,7 @@ impl StorageManager {
             bandwidth_limit_mbps,
             cpu_limit_percent,
             auto_start,
+            background_mode: true,
             created_at: now.clone(),
             updated_at: now,
         })
@@ -216,7 +297,8 @@ impl StorageManager {
     pub fn get_node_config(&self) -> Result<Option<NodeConfig>> {
         let mut stmt = self.db.prepare(
             "SELECT node_id, node_type, node_name, install_path, disk_quota_gb,
-                    bandwidth_limit_mbps, cpu_limit_percent, auto_start, created_at, updated_at
+                    bandwidth_limit_mbps, cpu_limit_percent, auto_start, background_mode,
+                    created_at, updated_at
              FROM node_config LIMIT 1"
         ).context("Failed to prepare query")?;
 
@@ -230,8 +312,9 @@ impl StorageManager {
                 bandwidth_limit_mbps: row.get(5)?,
                 cpu_limit_percent: row.get(6)?,
                 auto_start: row.get::<_, i32>(7)? != 0,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                background_mode: row.get::<_, i32>(8)? != 0,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         }).context("Failed to query node config")?;
 
@@ -257,6 +340,24 @@ impl StorageManager {
         Ok(())
     }
 
+    pub fn update_auto_start(&self, enabled: bool) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.db.execute(
+            "UPDATE node_config SET auto_start = ?1, updated_at = ?2",
+            rusqlite::params![enabled as i32, now],
+        ).context("Failed to update auto_start")?;
+        Ok(())
+    }
+
+    pub fn update_background_mode(&self, enabled: bool) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.db.execute(
+            "UPDATE node_config SET background_mode = ?1, updated_at = ?2",
+            rusqlite::params![enabled as i32, now],
+        ).context("Failed to update background_mode")?;
+        Ok(())
+    }
+
     pub fn get_storage_status(&self) -> Result<StorageStatus> {
         let storage_path = self.install_path.join("storage");
         let (total_size, file_count) = walk_dir_size(&storage_path)?;
@@ -276,6 +377,122 @@ impl StorageManager {
 
     pub fn install_path(&self) -> &Path {
         &self.install_path
+    }
+
+    pub fn db(&self) -> &Connection {
+        &self.db
+    }
+
+    /// Safely relocate all Citinet data to a new path.
+    /// Uses copy-verify-rename strategy: old data is never deleted, only renamed as backup.
+    pub fn relocate(&mut self, new_path: &str, app_data_dir: &Path) -> Result<String> {
+        let new_base = Path::new(new_path);
+        let old_base = self.install_path.clone();
+
+        // 1. Validate
+        if new_path.is_empty() {
+            anyhow::bail!("New path cannot be empty");
+        }
+        if new_base == old_base {
+            anyhow::bail!("New path is the same as current path");
+        }
+        if new_path.to_lowercase().contains("program files") {
+            anyhow::bail!("Cannot relocate to Program Files directory");
+        }
+
+        // 2. Check new path is writable
+        fs::create_dir_all(new_base).context("Cannot create target directory")?;
+        let probe = new_base.join(".citinet_write_test");
+        fs::write(&probe, b"test").context("Target directory is not writable")?;
+        fs::remove_file(&probe).ok();
+
+        // 3. Check free space
+        let (current_size, _) = walk_dir_size(&old_base)?;
+        let required_bytes = current_size + (100 * 1024 * 1024); // current + 100MB buffer
+        if let Ok(space) = crate::system_monitor::get_drive_space_for_path(new_base) {
+            let free_bytes = (space.available_gb * 1_073_741_824.0) as u64;
+            if free_bytes < required_bytes {
+                anyhow::bail!(
+                    "Not enough space on target drive. Need {:.1} GB, have {:.1} GB free",
+                    required_bytes as f64 / 1_073_741_824.0,
+                    space.available_gb
+                );
+            }
+        }
+
+        // 4. Create directory structure
+        for dir in &["storage", "config", "logs", "bin"] {
+            fs::create_dir_all(new_base.join(dir))
+                .with_context(|| format!("Failed to create {}", dir))?;
+        }
+
+        // 5. Close current DB by replacing with a dummy in-memory connection
+        //    (we'll reopen the real one after copy)
+        let dummy_db = rusqlite::Connection::open_in_memory()?;
+        let _old_db = std::mem::replace(&mut self.db, dummy_db);
+        drop(_old_db);
+
+        // 6. Copy all files recursively
+        let copy_result = copy_dir_recursive(&old_base, new_base);
+        if let Err(e) = copy_result {
+            // Rollback: reopen old DB
+            let db_path = old_base.join("config").join("citinet.db");
+            self.db = rusqlite::Connection::open(&db_path)?;
+            // Clean up partial copy
+            let _ = fs::remove_dir_all(new_base);
+            anyhow::bail!("Copy failed, no changes made: {}", e);
+        }
+
+        // 7. Verify copy integrity
+        let (old_size, old_count) = walk_dir_size(&old_base)?;
+        let (new_size, new_count) = walk_dir_size(new_base)?;
+        if new_count < old_count || new_size < old_size {
+            // Rollback
+            let db_path = old_base.join("config").join("citinet.db");
+            self.db = rusqlite::Connection::open(&db_path)?;
+            let _ = fs::remove_dir_all(new_base);
+            anyhow::bail!(
+                "Verification failed: expected {} files ({} bytes), got {} files ({} bytes)",
+                old_count, old_size, new_count, new_size
+            );
+        }
+
+        // 8. Open new DB
+        let new_db_path = new_base.join("config").join("citinet.db");
+        self.db = rusqlite::Connection::open(&new_db_path)
+            .context("Failed to open database at new location")?;
+
+        // 9. Update install_path in the DB
+        let now = chrono::Utc::now().to_rfc3339();
+        self.db.execute(
+            "UPDATE node_config SET install_path = ?1, updated_at = ?2",
+            rusqlite::params![new_path, now],
+        ).context("Failed to update install_path in database")?;
+
+        // 10. Update marker file
+        let marker_path = app_data_dir.join("install_path.txt");
+        fs::write(&marker_path, new_path)
+            .context("Failed to update install_path.txt marker file")?;
+
+        // 11. Update in-memory path
+        self.install_path = new_base.to_path_buf();
+
+        // 12. Rename old directory as backup (don't delete)
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_name = format!(
+            "{}_migrated_{}",
+            old_base.file_name().unwrap_or_default().to_string_lossy(),
+            timestamp
+        );
+        let backup_path = old_base.parent().unwrap_or(&old_base).join(&backup_name);
+        let backup_display = if fs::rename(&old_base, &backup_path).is_ok() {
+            backup_path.to_string_lossy().to_string()
+        } else {
+            // Rename failed (cross-drive) — leave old dir in place
+            format!("{} (could not rename, please delete manually)", old_base.display())
+        };
+
+        Ok(backup_display)
     }
 
     pub fn upload_file(&self, user_id: &str, file_name: &str, file_data: &[u8], is_public: bool) -> Result<File> {
@@ -414,6 +631,35 @@ impl StorageManager {
 
         let file_path = self.install_path.join("storage").join(file_name);
         fs::read(&file_path).context("Failed to read file")
+    }
+
+    pub fn update_file_visibility(&self, requesting_user_id: &str, file_name: &str, is_public: bool) -> Result<()> {
+        validate_filename(file_name)?;
+
+        let mut stmt = self.db.prepare(
+            "SELECT file_id, user_id FROM files WHERE file_name = ?1"
+        )?;
+        let file: Option<(String, String)> = stmt.query_row([file_name], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        }).ok();
+
+        let (file_id, owner_id) = file.ok_or_else(|| anyhow::anyhow!("File not found: {}", file_name))?;
+
+        if owner_id != requesting_user_id {
+            let is_admin = self.get_user_by_id(requesting_user_id)?
+                .map(|u| u.is_admin)
+                .unwrap_or(false);
+            if !is_admin {
+                anyhow::bail!("Permission denied: not the file owner");
+            }
+        }
+
+        self.db.execute(
+            "UPDATE files SET is_public = ?1 WHERE file_id = ?2",
+            rusqlite::params![is_public as i32, file_id],
+        )?;
+
+        Ok(())
     }
 
     // --- User management methods ---
@@ -668,11 +914,328 @@ impl StorageManager {
 
         Ok(spaces)
     }
+
+    // --- Messaging methods ---
+
+    pub fn create_dm_conversation(&self, user_a_id: &str, user_b_id: &str) -> Result<Conversation> {
+        // Check if a DM already exists between these two users
+        let existing = self.db.prepare(
+            "SELECT c.conversation_id, c.kind, c.name, c.created_by, c.created_at, c.updated_at
+             FROM conversations c
+             JOIN conversation_members cm1 ON c.conversation_id = cm1.conversation_id
+             JOIN conversation_members cm2 ON c.conversation_id = cm2.conversation_id
+             WHERE c.kind = 'dm' AND cm1.user_id = ?1 AND cm2.user_id = ?2"
+        )?.query_row(rusqlite::params![user_a_id, user_b_id], |row| {
+            Ok(Conversation {
+                conversation_id: row.get(0)?,
+                kind: row.get(1)?,
+                name: row.get(2)?,
+                created_by: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        }).ok();
+
+        if let Some(conv) = existing {
+            return Ok(conv);
+        }
+
+        let conversation_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        self.db.execute(
+            "INSERT INTO conversations (conversation_id, kind, name, created_by, created_at, updated_at)
+             VALUES (?1, 'dm', NULL, ?2, ?3, ?4)",
+            rusqlite::params![conversation_id, user_a_id, now, now],
+        ).context("Failed to create conversation")?;
+
+        for uid in &[user_a_id, user_b_id] {
+            self.db.execute(
+                "INSERT INTO conversation_members (conversation_id, user_id, joined_at)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![conversation_id, uid, now],
+            ).context("Failed to add conversation member")?;
+        }
+
+        Ok(Conversation {
+            conversation_id,
+            kind: "dm".to_string(),
+            name: None,
+            created_by: user_a_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub fn create_group_conversation(
+        &self,
+        creator_id: &str,
+        name: &str,
+        member_ids: &[String],
+    ) -> Result<Conversation> {
+        let conversation_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        self.db.execute(
+            "INSERT INTO conversations (conversation_id, kind, name, created_by, created_at, updated_at)
+             VALUES (?1, 'group', ?2, ?3, ?4, ?5)",
+            rusqlite::params![conversation_id, name, creator_id, now, now],
+        ).context("Failed to create group conversation")?;
+
+        // Add creator as member
+        self.db.execute(
+            "INSERT INTO conversation_members (conversation_id, user_id, joined_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![conversation_id, creator_id, now],
+        )?;
+
+        // Add other members
+        for uid in member_ids {
+            if uid != creator_id {
+                self.db.execute(
+                    "INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, joined_at)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![conversation_id, uid, now],
+                )?;
+            }
+        }
+
+        Ok(Conversation {
+            conversation_id,
+            kind: "group".to_string(),
+            name: Some(name.to_string()),
+            created_by: creator_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    pub fn add_group_member(&self, conversation_id: &str, user_id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.db.execute(
+            "INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, joined_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![conversation_id, user_id, now],
+        ).context("Failed to add group member")?;
+        Ok(())
+    }
+
+    pub fn remove_group_member(&self, conversation_id: &str, user_id: &str) -> Result<()> {
+        self.db.execute(
+            "DELETE FROM conversation_members WHERE conversation_id = ?1 AND user_id = ?2",
+            rusqlite::params![conversation_id, user_id],
+        ).context("Failed to remove group member")?;
+        Ok(())
+    }
+
+    pub fn rename_conversation(&self, conversation_id: &str, name: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.db.execute(
+            "UPDATE conversations SET name = ?1, updated_at = ?2 WHERE conversation_id = ?3",
+            rusqlite::params![name, now, conversation_id],
+        ).context("Failed to rename conversation")?;
+        Ok(())
+    }
+
+    pub fn is_conversation_member(&self, conversation_id: &str, user_id: &str) -> Result<bool> {
+        self.db.prepare(
+            "SELECT 1 FROM conversation_members WHERE conversation_id = ?1 AND user_id = ?2"
+        )?.exists(rusqlite::params![conversation_id, user_id])
+            .context("Failed to check membership")
+    }
+
+    pub fn get_conversation_members(&self, conversation_id: &str) -> Result<Vec<ConversationMember>> {
+        let mut stmt = self.db.prepare(
+            "SELECT cm.user_id, u.username, cm.joined_at
+             FROM conversation_members cm
+             JOIN users u ON cm.user_id = u.user_id
+             WHERE cm.conversation_id = ?1"
+        )?;
+
+        let members = stmt.query_map([conversation_id], |row| {
+            Ok(ConversationMember {
+                user_id: row.get(0)?,
+                username: row.get(1)?,
+                joined_at: row.get(2)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(members)
+    }
+
+    fn get_last_message(&self, conversation_id: &str) -> Result<Option<Message>> {
+        let mut stmt = self.db.prepare(
+            "SELECT m.message_id, m.conversation_id, m.sender_id, u.username, m.body, m.created_at
+             FROM messages m
+             JOIN users u ON m.sender_id = u.user_id
+             WHERE m.conversation_id = ?1
+             ORDER BY m.created_at DESC
+             LIMIT 1"
+        )?;
+
+        let mut rows = stmt.query_map([conversation_id], |row| {
+            Ok(Message {
+                message_id: row.get(0)?,
+                conversation_id: row.get(1)?,
+                sender_id: row.get(2)?,
+                sender_username: row.get(3)?,
+                body: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+
+        match rows.next() {
+            Some(Ok(msg)) => Ok(Some(msg)),
+            Some(Err(e)) => Err(e.into()),
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationWithMembers>> {
+        let mut stmt = self.db.prepare(
+            "SELECT c.conversation_id, c.kind, c.name, c.created_by, c.created_at, c.updated_at
+             FROM conversations c
+             JOIN conversation_members cm ON c.conversation_id = cm.conversation_id
+             WHERE cm.user_id = ?1
+             ORDER BY c.updated_at DESC"
+        )?;
+
+        let convs: Vec<Conversation> = stmt.query_map([user_id], |row| {
+            Ok(Conversation {
+                conversation_id: row.get(0)?,
+                kind: row.get(1)?,
+                name: row.get(2)?,
+                created_by: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = Vec::new();
+        for conv in convs {
+            let members = self.get_conversation_members(&conv.conversation_id)?;
+            let last_message = self.get_last_message(&conv.conversation_id)?;
+            result.push(ConversationWithMembers {
+                conversation: conv,
+                members,
+                last_message,
+            });
+        }
+
+        Ok(result)
+    }
+
+    pub fn create_message(
+        &self,
+        conversation_id: &str,
+        sender_id: &str,
+        body: &str,
+    ) -> Result<Message> {
+        let is_member = self.is_conversation_member(conversation_id, sender_id)?;
+        if !is_member {
+            anyhow::bail!("User is not a member of this conversation");
+        }
+
+        let message_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        self.db.execute(
+            "INSERT INTO messages (message_id, conversation_id, sender_id, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![message_id, conversation_id, sender_id, body, now],
+        ).context("Failed to create message")?;
+
+        self.db.execute(
+            "UPDATE conversations SET updated_at = ?1 WHERE conversation_id = ?2",
+            rusqlite::params![now, conversation_id],
+        )?;
+
+        let username = self.get_user_by_id(sender_id)?
+            .map(|u| u.username)
+            .unwrap_or_default();
+
+        Ok(Message {
+            message_id,
+            conversation_id: conversation_id.to_string(),
+            sender_id: sender_id.to_string(),
+            sender_username: username,
+            body: body.to_string(),
+            created_at: now,
+        })
+    }
+
+    pub fn list_messages(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<&str>,
+    ) -> Result<Vec<Message>> {
+        if let Some(cursor) = before {
+            let mut stmt = self.db.prepare(
+                "SELECT m.message_id, m.conversation_id, m.sender_id, u.username, m.body, m.created_at
+                 FROM messages m
+                 JOIN users u ON m.sender_id = u.user_id
+                 WHERE m.conversation_id = ?1 AND m.created_at < ?2
+                 ORDER BY m.created_at DESC
+                 LIMIT ?3"
+            )?;
+            let rows = stmt.query_map(rusqlite::params![conversation_id, cursor, limit], |row| {
+                Ok(Message {
+                    message_id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    sender_id: row.get(2)?,
+                    sender_username: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        } else {
+            let mut stmt = self.db.prepare(
+                "SELECT m.message_id, m.conversation_id, m.sender_id, u.username, m.body, m.created_at
+                 FROM messages m
+                 JOIN users u ON m.sender_id = u.user_id
+                 WHERE m.conversation_id = ?1
+                 ORDER BY m.created_at DESC
+                 LIMIT ?2"
+            )?;
+            let rows = stmt.query_map(rusqlite::params![conversation_id, limit], |row| {
+                Ok(Message {
+                    message_id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    sender_id: row.get(2)?,
+                    sender_username: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        }
+    }
 }
 
 fn validate_filename(name: &str) -> Result<()> {
     if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') {
         anyhow::bail!("Invalid filename: {}", name);
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src).context("Failed to read source directory")? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if entry.metadata()?.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .with_context(|| format!("Failed to copy {:?}", src_path))?;
+        }
     }
     Ok(())
 }

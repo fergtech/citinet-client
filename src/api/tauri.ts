@@ -38,6 +38,7 @@ export interface NodeConfig {
   bandwidth_limit_mbps: number;
   cpu_limit_percent: number;
   auto_start: boolean;
+  background_mode: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -197,10 +198,11 @@ export class CitinetAPI {
     return await invoke<FileInfo[]>("list_files");
   }
 
-  static async uploadFile(fileName: string, fileData: Uint8Array): Promise<void> {
+  static async uploadFile(fileName: string, fileData: Uint8Array, isPublic: boolean = true): Promise<void> {
     return await invoke("upload_file", {
       fileName,
       fileData: Array.from(fileData),
+      isPublic,
     });
   }
 
@@ -211,6 +213,22 @@ export class CitinetAPI {
   static async readFile(fileName: string): Promise<Uint8Array> {
     const data = await invoke<number[]>("read_file", { fileName });
     return new Uint8Array(data);
+  }
+
+  static async updateFileVisibility(fileName: string, isPublic: boolean): Promise<void> {
+    return await invoke("update_file_visibility", { fileName, isPublic });
+  }
+
+  static async setAutoStart(enabled: boolean): Promise<void> {
+    return await invoke("set_auto_start", { enabled });
+  }
+
+  static async setBackgroundMode(enabled: boolean): Promise<void> {
+    return await invoke("set_background_mode", { enabled });
+  }
+
+  static async relocateStorage(newPath: string): Promise<string> {
+    return await invoke<string>("relocate_storage", { newPath });
   }
 
   // --- Tunnel commands ---

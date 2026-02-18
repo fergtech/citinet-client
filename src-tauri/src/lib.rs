@@ -7,6 +7,9 @@ mod auth;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri_plugin_autostart::ManagerExt;
 use system_monitor::{SystemMetrics, SystemMonitor, HardwareInfo, DriveSpace};
 use storage_manager::{StorageManager, NodeConfig, StorageStatus, NodeStatus, File, User};
 use tunnel_manager::TunnelManager;
@@ -16,8 +19,12 @@ struct AppState {
     monitor: Arc<Mutex<SystemMonitor>>,
     storage_manager: Arc<Mutex<Option<StorageManager>>>,
     tunnel_manager: Arc<Mutex<Option<TunnelManager>>>,
+    tunnel_stopped_manually: Arc<Mutex<bool>>,
     started_at: Instant,
 }
+
+// Shared flag for close-to-tray behavior
+struct BackgroundModeState(Arc<Mutex<bool>>);
 
 #[tauri::command]
 fn get_system_metrics(state: State<AppState>) -> Result<SystemMetrics, String> {
@@ -85,6 +92,7 @@ fn initialize_node(
     let mut sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
 
     let sm = StorageManager::initialize(&install_path).map_err(|e| e.to_string())?;
+    auth::init_jwt_secret(sm.db()).map_err(|e| e.to_string())?;
     let config = sm.save_node_config(
         &node_type, &node_name, disk_quota_gb, bandwidth_limit_mbps, cpu_limit_percent, auto_start,
     ).map_err(|e| e.to_string())?;
@@ -244,15 +252,13 @@ fn update_user_role(state: State<AppState>, user_id: String, is_admin: bool) -> 
 // --- File commands ---
 
 #[tauri::command]
-fn upload_file(state: State<AppState>, file_name: String, file_data: Vec<u8>) -> Result<File, String> {
+fn upload_file(state: State<AppState>, file_name: String, file_data: Vec<u8>, is_public: bool) -> Result<File, String> {
     let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
     match sm_lock.as_ref() {
         Some(sm) => {
-            // Get admin user for desktop operations
             let admin = sm.get_first_admin().map_err(|e| e.to_string())?
                 .ok_or("No admin user found")?;
-            // Desktop uploads default to public
-            sm.upload_file(&admin.user_id, &file_name, &file_data, true).map_err(|e| e.to_string())
+            sm.upload_file(&admin.user_id, &file_name, &file_data, is_public).map_err(|e| e.to_string())
         },
         None => Err("Node not initialized".to_string()),
     }
@@ -296,10 +302,108 @@ fn read_file(state: State<AppState>, file_name: String) -> Result<Vec<u8>, Strin
     }
 }
 
+#[tauri::command]
+fn update_file_visibility(state: State<AppState>, file_name: String, is_public: bool) -> Result<(), String> {
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    match sm_lock.as_ref() {
+        Some(sm) => {
+            let admin = sm.get_first_admin().map_err(|e| e.to_string())?
+                .ok_or("No admin user found")?;
+            sm.update_file_visibility(&admin.user_id, &file_name, is_public).map_err(|e| e.to_string())
+        },
+        None => Err("Node not initialized".to_string()),
+    }
+}
+
+#[tauri::command]
+fn relocate_storage(app: tauri::AppHandle, state: State<AppState>, new_path: String) -> Result<String, String> {
+    // 1. Stop tunnel if running
+    {
+        let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(tm) = tm_lock.as_mut() {
+            let _ = tm.stop_tunnel();
+        }
+    }
+
+    // 2. Relocate storage (copy-verify-rename)
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let backup_path = {
+        let mut sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_mut().ok_or("Node not initialized")?;
+        sm.relocate(&new_path, &app_data_dir).map_err(|e| e.to_string())?
+    };
+
+    // 3. Replace TunnelManager with one pointing to new path
+    {
+        let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+        let new_tm = TunnelManager::new(sm.install_path());
+        let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        *tm_lock = Some(new_tm);
+    }
+
+    Ok(backup_path)
+}
+
+// --- Auto-start & Background mode commands ---
+
+#[tauri::command]
+fn set_auto_start(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    // Persist to DB
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+    sm.update_auto_start(enabled).map_err(|e| e.to_string())?;
+
+    // Sync with OS autostart via plugin
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())?;
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn set_background_mode(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    // Persist to DB
+    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+    let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+    sm.update_background_mode(enabled).map_err(|e| e.to_string())?;
+
+    // Update in-memory flag
+    let bg_state = app.state::<BackgroundModeState>();
+    let mut bg = bg_state.0.lock().map_err(|e| e.to_string())?;
+    *bg = enabled;
+
+    Ok(())
+}
+
 // --- Tunnel commands ---
 
 #[tauri::command]
 fn start_quick_tunnel(state: State<AppState>, local_port: u16) -> Result<String, String> {
+    // Clear manual-stop flag so watchdog can monitor this tunnel
+    if let Ok(mut flag) = state.tunnel_stopped_manually.lock() {
+        *flag = false;
+    }
+    // Warn if port doesn't match the API server
+    if local_port != hub_api::HUB_API_PORT {
+        log::warn!(
+            "Quick tunnel port {} differs from Hub API port {}. Tunnel may not work correctly.",
+            local_port, hub_api::HUB_API_PORT
+        );
+    }
+
     let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
     let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
 
@@ -347,15 +451,35 @@ fn setup_tunnel(
 
 #[tauri::command]
 fn start_tunnel(state: State<AppState>) -> Result<(), String> {
+    // Clear manual-stop flag so watchdog can monitor this tunnel
+    if let Ok(mut flag) = state.tunnel_stopped_manually.lock() {
+        *flag = false;
+    }
     let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
     match tm_lock.as_mut() {
-        Some(tm) => tm.start_tunnel().map_err(|e| e.to_string()),
+        Some(tm) => {
+            // Validate configured port matches API port
+            if let Some(cfg) = tm.get_config() {
+                if cfg.local_port != hub_api::HUB_API_PORT {
+                    return Err(format!(
+                        "Tunnel is configured for port {} but the Hub API runs on port {}. \
+                         Please reconfigure the tunnel with the correct port.",
+                        cfg.local_port, hub_api::HUB_API_PORT
+                    ));
+                }
+            }
+            tm.start_tunnel().map_err(|e| e.to_string())
+        }
         None => Err("Tunnel not configured".to_string()),
     }
 }
 
 #[tauri::command]
 fn stop_tunnel(state: State<AppState>) -> Result<(), String> {
+    // Signal watchdog: this is intentional, don't auto-restart
+    if let Ok(mut flag) = state.tunnel_stopped_manually.lock() {
+        *flag = true;
+    }
     let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
     match tm_lock.as_mut() {
         Some(tm) => tm.stop_tunnel().map_err(|e| e.to_string()),
@@ -382,19 +506,32 @@ pub fn run() {
     let started_at = Instant::now();
     let storage_manager = Arc::new(Mutex::new(None::<StorageManager>));
     let tunnel_manager = Arc::new(Mutex::new(None::<TunnelManager>));
+    let tunnel_stopped_manually = Arc::new(Mutex::new(false));
     let monitor = Arc::new(Mutex::new(SystemMonitor::new()));
+    let background_mode = Arc::new(Mutex::new(true)); // default: minimize to tray
 
-    // Clone Arcs for the API server
+    // Clone Arcs for the API server and tunnel watchdog
     let api_sm = storage_manager.clone();
     let api_tm = tunnel_manager.clone();
+    let watchdog_stopped_flag = tunnel_stopped_manually.clone();
+    let watchdog_tm = tunnel_manager.clone();
+    let autostart_tm = tunnel_manager.clone();
+    let autostart_stopped_flag = tunnel_stopped_manually.clone();
+    let bg_mode_for_close = background_mode.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(AppState {
             monitor,
             storage_manager,
             tunnel_manager,
+            tunnel_stopped_manually,
             started_at,
         })
+        .manage(BackgroundModeState(background_mode))
         .invoke_handler(tauri::generate_handler![
             get_system_metrics,
             get_hardware_info,
@@ -416,6 +553,10 @@ pub fn run() {
             list_files,
             delete_file,
             read_file,
+            update_file_visibility,
+            relocate_storage,
+            set_auto_start,
+            set_background_mode,
             start_quick_tunnel,
             install_cloudflared,
             check_cloudflared,
@@ -424,6 +565,15 @@ pub fn run() {
             stop_tunnel,
             get_tunnel_status
         ])
+        .on_window_event(move |window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let bg = bg_mode_for_close.lock().unwrap_or_else(|e| e.into_inner());
+                if *bg {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -452,6 +602,9 @@ pub fn run() {
                                 .join("citinet.db");
                             if db_path.exists() {
                                 if let Ok(sm) = StorageManager::open(&install_path) {
+                                    if let Err(e) = auth::init_jwt_secret(sm.db()) {
+                                        log::error!("Failed to initialize JWT secret: {}", e);
+                                    }
                                     let install = std::path::PathBuf::from(&install_path);
                                     let tm = TunnelManager::new(&install);
                                     {
@@ -472,20 +625,164 @@ pub fn run() {
                 }
             }
 
+            // --- Tray icon ---
+            let show_i = MenuItem::with_id(app, "show", "Show Citinet", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // --- Sync autostart + background_mode from DB ---
+            {
+                let app_state = app.state::<AppState>();
+                let sm_lock = app_state.storage_manager.lock().unwrap();
+                if let Some(sm) = sm_lock.as_ref() {
+                    if let Ok(Some(config)) = sm.get_node_config() {
+                        // Sync OS autostart with saved preference
+                        let autolaunch = app.autolaunch();
+                        if config.auto_start {
+                            let _ = autolaunch.enable();
+                        } else {
+                            let _ = autolaunch.disable();
+                        }
+
+                        // Sync background mode flag
+                        let bg_state = app.state::<BackgroundModeState>();
+                        let mut bg = bg_state.0.lock().unwrap();
+                        *bg = config.background_mode;
+                    }
+                }
+            }
+
             // Spawn the Hub HTTP API server on port 9090
+            let (msg_tx, _) = tokio::sync::broadcast::channel::<hub_api::BroadcastMessage>(256);
             let api_state = hub_api::ApiState {
                 storage_manager: api_sm,
                 tunnel_manager: api_tm,
                 started_at,
+                msg_tx,
+                auth_limiter: hub_api::RateLimiter::new(10, 1.0),
             };
 
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = hub_api::start_hub_api(api_state, 9090).await {
+                if let Err(e) = hub_api::start_hub_api(api_state, hub_api::HUB_API_PORT).await {
                     log::error!("Hub API server failed: {}", e);
                 }
             });
 
-            log::info!("Hub API server starting on port 9090");
+            log::info!("Hub API server starting on port {}", hub_api::HUB_API_PORT);
+
+            // Auto-start tunnel if previously configured
+            // Runs in a background thread since quick tunnel startup blocks on URL parsing
+            std::thread::spawn(move || {
+                // Wait for API server to be ready
+                std::thread::sleep(std::time::Duration::from_secs(3));
+
+                let has_config = {
+                    let tm_lock = autostart_tm.lock().ok();
+                    tm_lock.as_ref()
+                        .and_then(|l| l.as_ref())
+                        .and_then(|tm| tm.get_config().cloned())
+                };
+
+                if let Some(config) = has_config {
+                    log::info!("Auto-starting tunnel (mode: {}, port: {})", config.mode, config.local_port);
+                    let mut tm_lock = match autostart_tm.lock() {
+                        Ok(l) => l,
+                        Err(_) => return,
+                    };
+                    if let Some(tm) = tm_lock.as_mut() {
+                        match tm.start_tunnel() {
+                            Ok(_) => {
+                                // Clear manual-stop flag so watchdog can monitor
+                                if let Ok(mut flag) = autostart_stopped_flag.lock() {
+                                    *flag = false;
+                                }
+                                log::info!("Tunnel auto-started successfully");
+                            }
+                            Err(e) => log::error!("Tunnel auto-start failed: {}", e),
+                        }
+                    }
+                }
+            });
+
+            // Tunnel watchdog — checks every 30s, auto-restarts if process crashes
+            // Only activates after seeing the tunnel running at least once.
+            // Respects manual stop — won't restart if user intentionally stopped it.
+            tauri::async_runtime::spawn(async move {
+                let mut was_running = false;
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+                    // Skip if user manually stopped the tunnel
+                    let manually_stopped = watchdog_stopped_flag.lock()
+                        .map(|f| *f).unwrap_or(false);
+                    if manually_stopped {
+                        was_running = false;
+                        continue;
+                    }
+
+                    let (is_running, is_configured) = {
+                        let mut tm_lock = match watchdog_tm.lock() {
+                            Ok(l) => l,
+                            Err(_) => continue,
+                        };
+                        if let Some(tm) = tm_lock.as_mut() {
+                            let status = tm.get_status();
+                            (status.running, status.configured)
+                        } else {
+                            (false, false)
+                        }
+                    };
+
+                    if is_running {
+                        was_running = true;
+                    } else if was_running && is_configured {
+                        log::warn!("Tunnel process crashed — attempting auto-restart...");
+                        was_running = false;
+                        let mut tm_lock = match watchdog_tm.lock() {
+                            Ok(l) => l,
+                            Err(_) => continue,
+                        };
+                        if let Some(tm) = tm_lock.as_mut() {
+                            match tm.start_tunnel() {
+                                Ok(_) => {
+                                    log::info!("Tunnel auto-restarted successfully");
+                                    was_running = true;
+                                }
+                                Err(e) => log::error!("Tunnel auto-restart failed: {}", e),
+                            }
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })

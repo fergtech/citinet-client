@@ -14,7 +14,7 @@ export function Dashboard() {
     <div className="flex h-screen bg-[var(--bg-primary)]">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="flex-1 overflow-y-auto p-8 grid-bg">
         {activeTab === "dashboard" && (
           <div className="max-w-4xl">
             <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-6">

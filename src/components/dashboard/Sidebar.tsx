@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   FolderOpen,
@@ -5,8 +6,11 @@ import {
   HelpCircle,
   Shield,
   LogOut,
+  MessageSquare,
+  ExternalLink,
 } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
+import { CitinetAPI } from "../../api/tauri";
 
 interface SidebarProps {
   activeTab: string;
@@ -21,7 +25,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "files", label: "My Files", icon: FolderOpen },
+  { id: "files", label: "Files", icon: FolderOpen },
   { id: "admin", label: "Admin", icon: Shield },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "help", label: "Help", icon: HelpCircle },
@@ -47,6 +51,15 @@ function NavButton({ item, active, onClick }: { item: NavItem; active: boolean; 
 export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const logout = useAuthStore((s) => s.logout);
+  const [messagesUrl, setMessagesUrl] = useState("http://localhost:9090/messages");
+
+  useEffect(() => {
+    CitinetAPI.getTunnelStatus().then((ts) => {
+      if (ts.configured && ts.config?.hostname) {
+        setMessagesUrl(`https://${ts.config.hostname}/messages`);
+      }
+    }).catch(() => {});
+  }, []);
 
   return (
     <aside className="w-56 h-screen bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col transition-colors duration-200">
@@ -54,7 +67,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       <div className="flex items-center gap-2 px-5 py-5 border-b border-[var(--border-color)]">
         <img src="/logo.png" alt="Citinet" className="w-6 h-6" />
         <span className="text-lg font-bold text-[var(--text-primary)]">
-          Citinet
+          citinet
         </span>
       </div>
 
@@ -68,6 +81,18 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             onClick={() => onTabChange(item.id)}
           />
         ))}
+
+        {/* External: opens messaging web app in browser */}
+        <a
+          href={messagesUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 mb-1 text-[var(--text-secondary)] hover:bg-surface-100 dark:hover:bg-surface-800"
+        >
+          <MessageSquare className="w-4.5 h-4.5" />
+          Messages
+          <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
+        </a>
       </nav>
 
       {/* User info + logout */}

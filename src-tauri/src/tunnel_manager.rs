@@ -743,6 +743,10 @@ impl TunnelManager {
         Ok(())
     }
 
+    pub fn get_config(&self) -> Option<&TunnelConfig> {
+        self.config.as_ref()
+    }
+
     pub fn get_status(&mut self) -> TunnelStatus {
         let running = if let Some(ref mut child) = self.child {
             match child.try_wait() {

@@ -17,7 +17,7 @@ export function Button({
 
   const variants = {
     primary:
-      "bg-primary-500 text-white hover:bg-primary-600 active:bg-primary-700 shadow-sm",
+      "btn-gradient shadow-sm shadow-primary-500/20",
     secondary:
       "bg-[var(--bg-card)] text-[var(--text-primary)] border border-[var(--border-color)] hover:bg-surface-100 dark:hover:bg-surface-700",
     ghost:

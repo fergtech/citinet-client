@@ -1,35 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  /* Primary: Purple/Violet to match web portal */
+  /* Primary: Purple/Violet */
   --color-primary-50: #f5f3ff;
   --color-primary-100: #ede9fe;
   --color-primary-200: #ddd6fe;
   --color-primary-300: #c4b5fd;
   --color-primary-400: #a78bfa;
-  --color-primary-500: #7c3aed;
-  --color-primary-600: #6d28d9;
-  --color-primary-700: #5b21b6;
-  --color-primary-800: #4c1d95;
-  --color-primary-900: #3b0f7a;
+  --color-primary-500: #8b5cf6;
+  --color-primary-600: #7c3aed;
+  --color-primary-700: #6d28d9;
+  --color-primary-800: #5b21b6;
+  --color-primary-900: #4c1d95;
 
-  /* Accent: Green for status indicators */
-  --color-accent-400: #4ade80;
-  --color-accent-500: #22c55e;
-  --color-accent-600: #16a34a;
+  /* Accent: Teal-Green for status + avatars */
+  --color-accent-400: #34d399;
+  --color-accent-500: #10b981;
+  --color-accent-600: #059669;
 
-  /* Surface: Very dark navy/charcoal matching web portal */
-  --color-surface-50: #f0f1f5;
-  --color-surface-100: #e2e4eb;
-  --color-surface-200: #c5c9d6;
-  --color-surface-300: #9ca3b8;
-  --color-surface-400: #6b7394;
-  --color-surface-500: #4a5168;
-  --color-surface-600: #353b52;
-  --color-surface-700: #252a3a;
-  --color-surface-800: #1a1e2e;
-  --color-surface-900: #131623;
-  --color-surface-950: #0d0f1a;
+  /* Surface: Deep dark blue-charcoal */
+  --color-surface-50: #eef0f6;
+  --color-surface-100: #dde1ec;
+  --color-surface-200: #bcc3d6;
+  --color-surface-300: #8e97b0;
+  --color-surface-400: #5f6880;
+  --color-surface-500: #414960;
+  --color-surface-600: #2d3348;
+  --color-surface-700: #222838;
+  --color-surface-800: #181c28;
+  --color-surface-900: #12151f;
+  --color-surface-950: #0c0e16;
 }
 
 :root {
@@ -40,16 +40,18 @@
   --text-secondary: var(--color-surface-500);
   --text-muted: var(--color-surface-300);
   --border-color: var(--color-surface-200);
+  --surface-hover: var(--color-surface-100);
 }
 
 .dark {
   --bg-primary: var(--color-surface-950);
   --bg-secondary: var(--color-surface-900);
   --bg-card: var(--color-surface-800);
-  --text-primary: #e8eaed;
-  --text-secondary: #9ca3b8;
-  --text-muted: #4a5168;
-  --border-color: #252a3a;
+  --text-primary: #e2e5eb;
+  --text-secondary: #8e97b0;
+  --text-muted: #414960;
+  --border-color: #1e2231;
+  --surface-hover: rgba(139, 92, 246, 0.06);
 }
 
 body {
@@ -72,4 +74,32 @@ body {
 
 .progress-bar {
   width: var(--progress-width, 0%);
+}
+
+/* Subtle fixed grid background for main content areas */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(139, 92, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Purple gradient for primary action buttons */
+.btn-gradient {
+  background: linear-gradient(135deg, #8b5cf6, #a855f7, #c084fc);
+  color: white;
+  border: none;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+.btn-gradient:hover {
+  opacity: 0.9;
+}
+.btn-gradient:active {
+  transform: scale(0.98);
+}
+
+/* Glow effect for focused/active cards */
+.dark .card-glow {
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.1),
+    0 4px 24px rgba(0, 0, 0, 0.3);
 }
