@@ -151,7 +151,8 @@ pub async fn start_hub_api(state: ApiState, port: u16) -> anyhow::Result<()> {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .expose_headers(Any);
 
     let app = Router::new()
         .route("/api/health", get(health))

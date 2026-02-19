@@ -162,7 +162,7 @@ fn configure_tunnel_ingress(
             "ingress": [
                 {
                     "hostname": hostname,
-                    "service": format!("http://localhost:{}", local_port),
+                    "service": format!("http://127.0.0.1:{}", local_port),
                 },
                 {
                     "service": "http_status:404"
@@ -398,7 +398,7 @@ impl TunnelManager {
         }
 
         let cloudflared_cmd = self.get_cloudflared_command();
-        let url = format!("http://localhost:{}", local_port);
+        let url = format!("http://127.0.0.1:{}", local_port);
         log::info!("Starting quick tunnel for {}", url);
 
         let mut child = Command::new(&cloudflared_cmd)
@@ -623,7 +623,7 @@ impl TunnelManager {
 
         if config.mode == "quick" {
             // Restart quick tunnel — need to capture the new URL
-            let url = format!("http://localhost:{}", config.local_port);
+            let url = format!("http://127.0.0.1:{}", config.local_port);
             log::info!("Restarting quick tunnel for {}", url);
 
             let mut child = Command::new(&cloudflared_cmd)
