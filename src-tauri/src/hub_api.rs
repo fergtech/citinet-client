@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use axum::{
     Router,
-    extract::{Multipart, Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}},
     http::{StatusCode, header, HeaderMap},
     response::IntoResponse,
     routing::{get, patch, post},
@@ -121,6 +121,8 @@ pub struct UpdateFileRequest {
 #[derive(Deserialize)]
 pub struct SendMessageRequest {
     pub body: String,
+    #[serde(default)]
+    pub attachment_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +166,7 @@ pub async fn start_hub_api(state: ApiState, port: u16) -> anyhow::Result<()> {
         .route("/ws", get(ws_handler))
         .route("/api/files", get(list_files).post(upload_file))
         .route("/api/files/{name}", get(download_file).delete(delete_file_handler).patch(update_file_visibility_handler))
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB upload limit
         .layer(cors)
         .with_state(state);
 
@@ -331,7 +334,11 @@ async fn download_file(
     let data = sm.read_file(&claims.sub, &name).map_err(|_| StatusCode::NOT_FOUND)?;
 
     let content_type = mime_from_ext(&name);
-    let disposition = format!("attachment; filename=\"{}\"", name);
+    let disposition = if content_type.starts_with("image/") || content_type.starts_with("video/") {
+        format!("inline; filename=\"{}\"", name)
+    } else {
+        format!("attachment; filename=\"{}\"", name)
+    };
 
     Ok((
         [
@@ -394,6 +401,16 @@ fn mime_from_ext(name: &str) -> String {
         Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
         Some("png") => "image/png".to_string(),
         Some("gif") => "image/gif".to_string(),
+        Some("webp") => "image/webp".to_string(),
+        Some("svg") => "image/svg+xml".to_string(),
+        Some("bmp") => "image/bmp".to_string(),
+        Some("mp4") | Some("m4v") => "video/mp4".to_string(),
+        Some("webm") => "video/webm".to_string(),
+        Some("mov") => "video/quicktime".to_string(),
+        Some("avi") => "video/x-msvideo".to_string(),
+        Some("mkv") => "video/x-matroska".to_string(),
+        Some("ogv") => "video/ogg".to_string(),
+        Some("3gp") => "video/3gpp".to_string(),
         Some("pdf") => "application/pdf".to_string(),
         Some("txt") => "text/plain".to_string(),
         Some("html") | Some("htm") => "text/html".to_string(),
@@ -515,7 +532,7 @@ async fn send_message(
 ) -> Result<Json<Value>, StatusCode> {
     let claims = validate_auth_header(&headers)?;
 
-    if req.body.is_empty() {
+    if req.body.is_empty() && req.attachment_ids.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -523,7 +540,7 @@ async fn send_message(
         let sm_lock = state.storage_manager.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let sm = sm_lock.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-        sm.create_message(&conversation_id, &claims.sub, &req.body)
+        sm.create_message(&conversation_id, &claims.sub, &req.body, &req.attachment_ids)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
@@ -533,6 +550,7 @@ async fn send_message(
         "sender_id": message.sender_id,
         "sender_username": message.sender_username,
         "body": message.body,
+        "attachments": message.attachments,
         "created_at": message.created_at,
     });
 

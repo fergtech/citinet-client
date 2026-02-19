@@ -68,6 +68,13 @@ export interface FileInfo {
   created_at: string;
 }
 
+export interface MessageAttachment {
+  file_id: string;
+  file_name: string;
+  size_bytes: number;
+  mime_type: string;
+}
+
 export interface User {
   user_id: string;
   username: string;

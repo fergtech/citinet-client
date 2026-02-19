@@ -102,12 +102,21 @@ pub struct ConversationWithMembers {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageAttachment {
+    pub file_id: String,
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub mime_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub message_id: String,
     pub conversation_id: String,
     pub sender_id: String,
     pub sender_username: String,
     pub body: String,
+    pub attachments: Vec<MessageAttachment>,
     pub created_at: String,
 }
 
@@ -199,7 +208,15 @@ fn run_migrations(db: &Connection) -> Result<()> {
             FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
             FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);"
+        CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+        CREATE TABLE IF NOT EXISTS message_attachments (
+            message_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            PRIMARY KEY (message_id, file_id),
+            FOREIGN KEY (message_id) REFERENCES messages(message_id) ON DELETE CASCADE,
+            FOREIGN KEY (file_id) REFERENCES files(file_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_msg_attach_file ON message_attachments(file_id);"
     ).context("Failed to run schema migrations")?;
 
     // Safe column addition — only runs if column doesn't exist yet
@@ -624,9 +641,11 @@ impl StorageManager {
 
         let (owner_id, is_public) = file.ok_or_else(|| anyhow::anyhow!("File not found: {}", file_name))?;
 
-        // Check permissions: owner can always read, others can only read public files
+        // Check permissions: owner can always read, others can read public files or files attached to their conversations
         if owner_id != requesting_user_id && !is_public {
-            anyhow::bail!("Permission denied: file is private");
+            if !self.can_access_attached_file(requesting_user_id, file_name)? {
+                anyhow::bail!("Permission denied: file is private");
+            }
         }
 
         let file_path = self.install_path.join("storage").join(file_name);
@@ -1074,18 +1093,29 @@ impl StorageManager {
         )?;
 
         let mut rows = stmt.query_map([conversation_id], |row| {
-            Ok(Message {
-                message_id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                sender_id: row.get(2)?,
-                sender_username: row.get(3)?,
-                body: row.get(4)?,
-                created_at: row.get(5)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
         })?;
 
         match rows.next() {
-            Some(Ok(msg)) => Ok(Some(msg)),
+            Some(Ok((message_id, conv_id, sender_id, username, body, created_at))) => {
+                let attachments = self.get_message_attachments(&message_id)?;
+                Ok(Some(Message {
+                    message_id,
+                    conversation_id: conv_id,
+                    sender_id,
+                    sender_username: username,
+                    body,
+                    attachments,
+                    created_at,
+                }))
+            }
             Some(Err(e)) => Err(e.into()),
             None => Ok(None),
         }
@@ -1130,6 +1160,7 @@ impl StorageManager {
         conversation_id: &str,
         sender_id: &str,
         body: &str,
+        attachment_ids: &[String],
     ) -> Result<Message> {
         let is_member = self.is_conversation_member(conversation_id, sender_id)?;
         if !is_member {
@@ -1144,6 +1175,30 @@ impl StorageManager {
              VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![message_id, conversation_id, sender_id, body, now],
         ).context("Failed to create message")?;
+
+        // Link attachments
+        let mut attachments = Vec::new();
+        for file_id in attachment_ids {
+            // Verify file exists and sender owns it
+            let file: Option<(String, u64)> = self.db.prepare(
+                "SELECT file_name, size_bytes FROM files WHERE file_id = ?1 AND user_id = ?2"
+            )?.query_row(rusqlite::params![file_id, sender_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            }).ok();
+
+            if let Some((file_name, size_bytes)) = file {
+                self.db.execute(
+                    "INSERT OR IGNORE INTO message_attachments (message_id, file_id) VALUES (?1, ?2)",
+                    rusqlite::params![message_id, file_id],
+                )?;
+                attachments.push(MessageAttachment {
+                    file_id: file_id.clone(),
+                    mime_type: mime_from_ext(&file_name),
+                    file_name,
+                    size_bytes,
+                });
+            }
+        }
 
         self.db.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE conversation_id = ?2",
@@ -1160,8 +1215,41 @@ impl StorageManager {
             sender_id: sender_id.to_string(),
             sender_username: username,
             body: body.to_string(),
+            attachments,
             created_at: now,
         })
+    }
+
+    fn get_message_attachments(&self, message_id: &str) -> Result<Vec<MessageAttachment>> {
+        let mut stmt = self.db.prepare(
+            "SELECT f.file_id, f.file_name, f.size_bytes
+             FROM message_attachments ma
+             JOIN files f ON ma.file_id = f.file_id
+             WHERE ma.message_id = ?1"
+        )?;
+        let rows = stmt.query_map([message_id], |row| {
+            let file_name: String = row.get(1)?;
+            Ok(MessageAttachment {
+                file_id: row.get(0)?,
+                mime_type: mime_from_ext(&file_name),
+                file_name,
+                size_bytes: row.get(2)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Check if a file is attached to any conversation the user is a member of
+    pub fn can_access_attached_file(&self, user_id: &str, file_name: &str) -> Result<bool> {
+        let exists = self.db.prepare(
+            "SELECT 1 FROM files f
+             JOIN message_attachments ma ON f.file_id = ma.file_id
+             JOIN messages m ON ma.message_id = m.message_id
+             JOIN conversation_members cm ON m.conversation_id = cm.conversation_id
+             WHERE f.file_name = ?1 AND cm.user_id = ?2
+             LIMIT 1"
+        )?.exists(rusqlite::params![file_name, user_id])?;
+        Ok(exists)
     }
 
     pub fn list_messages(
@@ -1170,7 +1258,7 @@ impl StorageManager {
         limit: u32,
         before: Option<&str>,
     ) -> Result<Vec<Message>> {
-        if let Some(cursor) = before {
+        let raw_rows: Vec<(String, String, String, String, String, String)> = if let Some(cursor) = before {
             let mut stmt = self.db.prepare(
                 "SELECT m.message_id, m.conversation_id, m.sender_id, u.username, m.body, m.created_at
                  FROM messages m
@@ -1179,17 +1267,10 @@ impl StorageManager {
                  ORDER BY m.created_at DESC
                  LIMIT ?3"
             )?;
-            let rows = stmt.query_map(rusqlite::params![conversation_id, cursor, limit], |row| {
-                Ok(Message {
-                    message_id: row.get(0)?,
-                    conversation_id: row.get(1)?,
-                    sender_id: row.get(2)?,
-                    sender_username: row.get(3)?,
-                    body: row.get(4)?,
-                    created_at: row.get(5)?,
-                })
+            let result = stmt.query_map(rusqlite::params![conversation_id, cursor, limit], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
             })?.collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            result
         } else {
             let mut stmt = self.db.prepare(
                 "SELECT m.message_id, m.conversation_id, m.sender_id, u.username, m.body, m.created_at
@@ -1199,18 +1280,50 @@ impl StorageManager {
                  ORDER BY m.created_at DESC
                  LIMIT ?2"
             )?;
-            let rows = stmt.query_map(rusqlite::params![conversation_id, limit], |row| {
-                Ok(Message {
-                    message_id: row.get(0)?,
-                    conversation_id: row.get(1)?,
-                    sender_id: row.get(2)?,
-                    sender_username: row.get(3)?,
-                    body: row.get(4)?,
-                    created_at: row.get(5)?,
-                })
+            let result = stmt.query_map(rusqlite::params![conversation_id, limit], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
             })?.collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            result
+        };
+
+        let mut messages = Vec::with_capacity(raw_rows.len());
+        for (message_id, conv_id, sender_id, username, body, created_at) in raw_rows {
+            let attachments = self.get_message_attachments(&message_id)?;
+            messages.push(Message {
+                message_id,
+                conversation_id: conv_id,
+                sender_id,
+                sender_username: username,
+                body,
+                attachments,
+                created_at,
+            });
         }
+        Ok(messages)
+    }
+}
+
+fn mime_from_ext(name: &str) -> String {
+    match name.rsplit('.').next().map(|e| e.to_lowercase()).as_deref() {
+        Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
+        Some("png") => "image/png".to_string(),
+        Some("gif") => "image/gif".to_string(),
+        Some("webp") => "image/webp".to_string(),
+        Some("svg") => "image/svg+xml".to_string(),
+        Some("bmp") => "image/bmp".to_string(),
+        Some("ico") => "image/x-icon".to_string(),
+        Some("mp4") | Some("m4v") => "video/mp4".to_string(),
+        Some("webm") => "video/webm".to_string(),
+        Some("mov") => "video/quicktime".to_string(),
+        Some("avi") => "video/x-msvideo".to_string(),
+        Some("mkv") => "video/x-matroska".to_string(),
+        Some("ogv") => "video/ogg".to_string(),
+        Some("3gp") => "video/3gpp".to_string(),
+        Some("pdf") => "application/pdf".to_string(),
+        Some("txt") => "text/plain".to_string(),
+        Some("json") => "application/json".to_string(),
+        Some("zip") => "application/zip".to_string(),
+        _ => "application/octet-stream".to_string(),
     }
 }
 
