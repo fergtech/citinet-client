@@ -192,4 +192,21 @@ npm run test:watch    # Watch mode
 ---
 
 ## License
+
+MIT — see [LICENSE](./LICENSE)
+
 Citizens' Digital Infrastructure Project — Citinet
+
+---
+
+## Code Signing
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+See [CODE_SIGNING.md](./CODE_SIGNING.md) for team roles and policy details.
+
+## Privacy
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+
+See [PRIVACY.md](./PRIVACY.md) for full details.
