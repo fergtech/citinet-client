@@ -5,15 +5,15 @@ use std::time::Instant;
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Multipart, Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as WsMessage}},
-    http::{StatusCode, header, HeaderMap},
-    response::IntoResponse,
+    http::{StatusCode, header, HeaderMap, Method},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, patch, post},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
-use tower_http::cors::{Any, CorsLayer};
 
 use crate::storage_manager::StorageManager;
 use crate::tunnel_manager::TunnelManager;
@@ -147,13 +147,33 @@ pub struct ApiState {
 
 pub const HUB_API_PORT: u16 = 9090;
 
-pub async fn start_hub_api(state: ApiState, port: u16) -> anyhow::Result<()> {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .expose_headers(Any);
+/// Manual CORS middleware — injects headers on every response unconditionally.
+/// More robust than tower_http CorsLayer because it also covers error responses,
+/// proxy-stripped headers, and ensures OPTIONS preflight always succeeds.
+async fn cors_middleware(req: axum::http::Request<axum::body::Body>, next: Next) -> Response {
+    // Handle preflight OPTIONS immediately
+    if req.method() == Method::OPTIONS {
+        return (
+            StatusCode::NO_CONTENT,
+            [
+                (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+                (header::ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, PATCH, DELETE, OPTIONS"),
+                (header::ACCESS_CONTROL_ALLOW_HEADERS, "*"),
+                (header::ACCESS_CONTROL_MAX_AGE, "86400"),
+            ],
+        ).into_response();
+    }
 
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    headers.insert(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, PATCH, DELETE, OPTIONS".parse().unwrap());
+    headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, "*".parse().unwrap());
+    headers.insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, "*".parse().unwrap());
+    response
+}
+
+pub async fn start_hub_api(state: ApiState, port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/info", get(hub_info))
@@ -168,7 +188,7 @@ pub async fn start_hub_api(state: ApiState, port: u16) -> anyhow::Result<()> {
         .route("/api/files", get(list_files).post(upload_file))
         .route("/api/files/{name}", get(download_file).delete(delete_file_handler).patch(update_file_visibility_handler))
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100 MB upload limit
-        .layer(cors)
+        .layer(middleware::from_fn(cors_middleware))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;

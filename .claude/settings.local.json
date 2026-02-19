@@ -4,7 +4,8 @@
       "Bash(del \"D:\\\\eclipse-workspace\\\\citinet\\\\src\\\\components\\\\dashboard\\\\CommonsHome.tsx\")",
       "Bash(ls -la \"D:\\\\eclipse-workspace\\\\citinet\\\\src\"\" 2>/dev/null || echo \"Directory not found \")",
       "Bash(dir:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebSearch"
     ]
   }
 }

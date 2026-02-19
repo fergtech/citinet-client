@@ -458,6 +458,25 @@ impl TunnelManager {
 
         log::info!("Quick tunnel URL: {}", public_url);
 
+        // Verify the tunnel actually works by probing through it
+        let probe_url = format!("{}/api/health", public_url);
+        log::info!("Verifying tunnel connectivity: {}", probe_url);
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        // Give cloudflared a moment to establish the connection
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        match client.get(&probe_url).send() {
+            Ok(resp) => {
+                log::info!("Tunnel probe response: {} {}", resp.status(), resp.status().canonical_reason().unwrap_or(""));
+            }
+            Err(e) => {
+                log::error!("Tunnel probe FAILED — tunnel URL is not routing to local API: {}", e);
+                log::error!("This usually means cloudflared cannot reach 127.0.0.1:{} or a firewall is blocking traffic", local_port);
+            }
+        }
+
         // Keep draining stderr in a background thread so cloudflared
         // doesn't die from a broken pipe on Windows
         std::thread::spawn(move || {

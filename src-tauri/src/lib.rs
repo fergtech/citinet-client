@@ -701,8 +701,33 @@ pub fn run() {
             // Auto-start tunnel if previously configured
             // Runs in a background thread since quick tunnel startup blocks on URL parsing
             std::thread::spawn(move || {
-                // Wait for API server to be ready
-                std::thread::sleep(std::time::Duration::from_secs(3));
+                // Wait for API server to be ready by probing it
+                let api_url = format!("http://127.0.0.1:{}/api/health", hub_api::HUB_API_PORT);
+                let mut ready = false;
+                for attempt in 1..=20 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    match reqwest::blocking::Client::new()
+                        .get(&api_url)
+                        .timeout(std::time::Duration::from_secs(2))
+                        .send()
+                    {
+                        Ok(resp) if resp.status().is_success() => {
+                            log::info!("Hub API ready after {} attempts", attempt);
+                            ready = true;
+                            break;
+                        }
+                        Ok(resp) => {
+                            log::debug!("API probe attempt {}: status {}", attempt, resp.status());
+                        }
+                        Err(e) => {
+                            log::debug!("API probe attempt {}: {}", attempt, e);
+                        }
+                    }
+                }
+                if !ready {
+                    log::error!("Hub API not ready after 10s — skipping tunnel auto-start");
+                    return;
+                }
 
                 let has_config = {
                     let tm_lock = autostart_tm.lock().ok();
