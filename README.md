@@ -210,3 +210,8 @@ See [CODE_SIGNING.md](./CODE_SIGNING.md) for team roles and policy details.
 This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
 
 See [PRIVACY.md](./PRIVACY.md) for full details.
+
+## Related Citinet Repositories
+
+- [citinet](https://github.com/fergtech/citinet): Core hub and network backend
+- [citinet-info](https://github.com/fergtech/citinet-info): The informational companion site to the Citinet project
