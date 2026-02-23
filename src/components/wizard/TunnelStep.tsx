@@ -97,7 +97,7 @@ export function TunnelStep() {
     if (!cfApiToken || !nodeSlug) return;
     setSetting(true);
 
-    const hostname = `${nodeSlug}.citinet.io`; // will be user-configurable later
+    const hostname = `${nodeSlug}.citinet.cloud`; // will be user-configurable later
 
     let steps: SubStep[] = [
       { label: "Installing cloudflared", status: "pending" },

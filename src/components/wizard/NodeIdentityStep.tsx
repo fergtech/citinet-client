@@ -92,7 +92,7 @@ export function NodeIdentityStep() {
             <Globe className="w-4 h-4 text-primary-500 shrink-0" />
             <span className="text-sm text-[var(--text-primary)]">
               <span className="font-medium text-primary-500">
-                {nodeSlug}.citinet.io
+                {nodeSlug}.citinet.cloud
               </span>
             </span>
           </div>

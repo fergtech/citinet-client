@@ -17,7 +17,7 @@ Hub Admin installs Citinet desktop app
   → Community members access via web app or desktop login
 ```
 
-The desktop app is both the **admin dashboard** and the **backend server**. It runs an embedded axum HTTP API that serves files and handles authentication. When a Cloudflare Tunnel is connected, the hub becomes reachable at a public URL (e.g., `https://your-hub.trycloudflare.com` or a custom domain like `hub.citinet.io`).
+The desktop app is both the **admin dashboard** and the **backend server**. It runs an embedded axum HTTP API that serves files and handles authentication. When a Cloudflare Tunnel is connected, the hub becomes reachable at a public URL (e.g., `https://your-hub.trycloudflare.com` or a custom domain like `hub.citinet.cloud`).
 
 ---
 

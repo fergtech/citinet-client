@@ -4,7 +4,7 @@ import { CitinetAPI, TunnelStatus, User } from "../../api/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
   Globe, Link, Loader2, CheckCircle2, AlertCircle, Copy, Check,
-  Users, Shield, ShieldOff, Trash2, Share2, Mail,
+  Users, Shield, ShieldOff, Trash2, Share2, Mail, BookOpen,
 } from "lucide-react";
 
 // --- Tunnel Section ---
@@ -615,6 +615,136 @@ function UsersSection() {
   );
 }
 
+// --- Registry Section ---
+
+function RegistrySection() {
+  const [tunnelStatus, setTunnelStatus] = useState<TunnelStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [registered, setRegistered] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    CitinetAPI.getTunnelStatus()
+      .then((ts) => { setTunnelStatus(ts); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleRegister = async () => {
+    setWorking(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await CitinetAPI.registerHub();
+      setRegistered(true);
+      setSuccess("Hub listed — neighbors can now find and join your network.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleDeregister = async () => {
+    setWorking(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await CitinetAPI.deregisterHub();
+      setRegistered(false);
+      setSuccess("Hub removed from the public directory.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+          <span className="text-sm text-[var(--text-secondary)]">Loading...</span>
+        </div>
+      </Card>
+    );
+  }
+
+  const tunnelReady = tunnelStatus?.configured && tunnelStatus.running;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-3">
+        <BookOpen className="w-5 h-5 text-primary-500" />
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">Public Directory</h3>
+        {registered && (
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-accent-500/20 text-accent-500 font-medium">
+            Listed
+          </span>
+        )}
+      </div>
+
+      <p className="text-xs text-[var(--text-muted)] mb-4">
+        List your hub in the citinet.cloud directory so neighbors can find and join your network.
+        Your tunnel must be running first.
+      </p>
+
+      {!tunnelReady && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-surface-100 dark:bg-surface-800 border border-[var(--border-color)] mb-3">
+          <AlertCircle className="w-4 h-4 text-[var(--text-muted)] mt-0.5 shrink-0" />
+          <p className="text-xs text-[var(--text-muted)]">
+            Start your tunnel first so the directory has a public URL to share.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 mb-3">
+          <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-500">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-accent-500/10 border border-accent-500/30 mb-3">
+          <CheckCircle2 className="w-4 h-4 text-accent-500 mt-0.5 shrink-0" />
+          <p className="text-sm text-accent-500">{success}</p>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        {!registered ? (
+          <button
+            onClick={handleRegister}
+            disabled={working || !tunnelReady}
+            className="flex-1 py-2 px-4 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
+          >
+            {working ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Listing...
+              </span>
+            ) : "List in Directory"}
+          </button>
+        ) : (
+          <button
+            onClick={handleDeregister}
+            disabled={working}
+            className="flex-1 py-2 px-4 rounded-lg border border-red-300 dark:border-red-800 text-red-500 text-sm font-medium hover:bg-red-500/10 transition-colors disabled:opacity-50"
+          >
+            {working ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Removing...
+              </span>
+            ) : "Remove from Directory"}
+          </button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 // --- Main AdminPanel ---
 
 export function AdminPanel() {
@@ -623,6 +753,7 @@ export function AdminPanel() {
       <h2 className="text-xl font-bold text-[var(--text-primary)]">Admin Panel</h2>
       <UsersSection />
       <TunnelSection />
+      <RegistrySection />
     </div>
   );
 }

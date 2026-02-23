@@ -4,7 +4,7 @@ import { useAppStore } from "../../stores/appStore";
 import { useAuthStore } from "../../stores/authStore";
 import { Button } from "../ui/Button";
 import { CitinetAPI, TunnelStatus } from "../../api/tauri";
-import { CheckCircle2, Server, HardDrive, Globe, Wifi } from "lucide-react";
+import { CheckCircle2, Server, HardDrive, Globe, Wifi, Link } from "lucide-react";
 
 export function CompleteStep() {
   const { nodeName, nodeSlug, storageContribution, tunnelSkipped } =
@@ -20,10 +20,11 @@ export function CompleteStep() {
     }
   }, [tunnelSkipped]);
 
-  const publicUrl =
-    !tunnelSkipped && tunnelStatus?.configured
-      ? `${nodeSlug}.citinet.io`
-      : null;
+  const tunnelConfigured = !tunnelSkipped && tunnelStatus?.configured;
+  const webUrl = tunnelConfigured ? `${nodeSlug}.citinet.cloud` : null;
+  const tunnelUrl = tunnelConfigured && tunnelStatus?.config?.hostname
+    ? tunnelStatus.config.hostname
+    : null;
 
   return (
     <div className="text-center">
@@ -57,32 +58,49 @@ export function CompleteStep() {
           </div>
         </div>
 
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)] col-span-2">
-          {publicUrl ? (
-            <>
+        {webUrl ? (
+          <>
+            {/* Web address — where community members go */}
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)] col-span-2">
               <Globe className="w-5 h-5 text-primary-500 mt-0.5 shrink-0" />
               <div>
-                <p className="text-xs text-[var(--text-muted)]">Public URL</p>
+                <p className="text-xs text-[var(--text-muted)]">Web Address</p>
                 <p className="text-sm font-medium text-primary-500">
-                  {publicUrl}
+                  {webUrl}
+                </p>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Share this with your community
                 </p>
               </div>
-            </>
-          ) : (
-            <>
-              <Wifi className="w-5 h-5 text-[var(--text-muted)] mt-0.5 shrink-0" />
-              <div>
-                <p className="text-xs text-[var(--text-muted)]">Access</p>
-                <p className="text-sm font-medium text-[var(--text-primary)]">
-                  Local only
-                </p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  Set up a tunnel later from the Admin panel
-                </p>
+            </div>
+
+            {/* Tunnel URL — the underlying API endpoint */}
+            {tunnelUrl && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)] col-span-2">
+                <Link className="w-5 h-5 text-[var(--text-muted)] mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs text-[var(--text-muted)]">Tunnel Endpoint</p>
+                  <p className="text-sm font-mono text-[var(--text-secondary)] break-all">
+                    {tunnelUrl}
+                  </p>
+                </div>
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </>
+        ) : (
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-50 dark:bg-surface-900 border border-[var(--border-color)] col-span-2">
+            <Wifi className="w-5 h-5 text-[var(--text-muted)] mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs text-[var(--text-muted)]">Access</p>
+              <p className="text-sm font-medium text-[var(--text-primary)]">
+                Local only
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                Set up a tunnel later from the Admin panel
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <Button

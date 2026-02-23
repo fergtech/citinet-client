@@ -274,4 +274,14 @@ export class CitinetAPI {
   static async getTunnelStatus(): Promise<TunnelStatus> {
     return await invoke<TunnelStatus>("get_tunnel_status");
   }
+
+  // --- Registry commands ---
+
+  static async registerHub(): Promise<void> {
+    return await invoke("register_hub");
+  }
+
+  static async deregisterHub(): Promise<void> {
+    return await invoke("deregister_hub");
+  }
 }

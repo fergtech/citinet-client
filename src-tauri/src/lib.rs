@@ -487,6 +487,112 @@ fn stop_tunnel(state: State<AppState>) -> Result<(), String> {
     }
 }
 
+// --- Registry commands ---
+// REGISTRY_SECRET is embedded at compile time via: REGISTRY_SECRET=xxx cargo tauri build
+// During development without the env var, registry commands return a descriptive error.
+
+fn make_slug(name: &str) -> String {
+    let mut result = String::new();
+    let mut last_was_dash = false;
+    for c in name.to_lowercase().chars() {
+        if c.is_alphanumeric() {
+            result.push(c);
+            last_was_dash = false;
+        } else if !last_was_dash && !result.is_empty() {
+            result.push('-');
+            last_was_dash = true;
+        }
+    }
+    let result = result.trim_end_matches('-').to_string();
+    result.chars().take(63).collect()
+}
+
+#[tauri::command]
+fn register_hub(state: State<AppState>) -> Result<(), String> {
+    let secret = option_env!("REGISTRY_SECRET")
+        .ok_or("Registry not configured in this build (REGISTRY_SECRET not set)")?;
+
+    let (node_id, node_name) = {
+        let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+        let config = sm.get_node_config().map_err(|e| e.to_string())?
+            .ok_or("Node not configured")?;
+        (config.node_id, config.node_name)
+    };
+
+    let tunnel_url = {
+        let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        let status = tm_lock.as_mut()
+            .map(|tm| tm.get_status())
+            .ok_or("Tunnel not initialized")?;
+        if !status.configured {
+            return Err("Tunnel not configured — set up public access first".to_string());
+        }
+        let config = status.config.ok_or("Tunnel config missing")?;
+        if config.hostname.starts_with("http") {
+            config.hostname
+        } else {
+            format!("https://{}", config.hostname)
+        }
+    };
+
+    let slug = make_slug(&node_name);
+    let payload = serde_json::json!({
+        "id": node_id,
+        "name": node_name,
+        "slug": slug,
+        "location": "",
+        "tunnel_url": tunnel_url,
+        "online": true,
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let res = client
+        .post("https://registry.citinet.cloud/hubs")
+        .header("Authorization", format!("Bearer {}", secret))
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("Registry request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().unwrap_or_default();
+        return Err(format!("Registry error {}: {}", status, body));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn deregister_hub(state: State<AppState>) -> Result<(), String> {
+    let secret = option_env!("REGISTRY_SECRET")
+        .ok_or("Registry not configured in this build (REGISTRY_SECRET not set)")?;
+
+    let node_id = {
+        let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+        let config = sm.get_node_config().map_err(|e| e.to_string())?
+            .ok_or("Node not configured")?;
+        config.node_id
+    };
+
+    let url = format!("https://registry.citinet.cloud/hubs/{}", node_id);
+    let client = reqwest::blocking::Client::new();
+    let res = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", secret))
+        .send()
+        .map_err(|e| format!("Registry request failed: {}", e))?;
+
+    if res.status().as_u16() != 204 && !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().unwrap_or_default();
+        return Err(format!("Registry error {}: {}", status, body));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn get_tunnel_status(state: State<AppState>) -> Result<tunnel_manager::TunnelStatus, String> {
     let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
@@ -563,7 +669,9 @@ pub fn run() {
             setup_tunnel,
             start_tunnel,
             stop_tunnel,
-            get_tunnel_status
+            get_tunnel_status,
+            register_hub,
+            deregister_hub
         ])
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

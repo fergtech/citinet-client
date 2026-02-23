@@ -375,6 +375,7 @@ impl StorageManager {
         Ok(())
     }
 
+
     pub fn get_storage_status(&self) -> Result<StorageStatus> {
         let storage_path = self.install_path.join("storage");
         let (total_size, file_count) = walk_dir_size(&storage_path)?;
