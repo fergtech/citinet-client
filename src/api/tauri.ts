@@ -284,4 +284,8 @@ export class CitinetAPI {
   static async deregisterHub(): Promise<void> {
     return await invoke("deregister_hub");
   }
+
+  static async factoryReset(): Promise<void> {
+    return await invoke("factory_reset");
+  }
 }

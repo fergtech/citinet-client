@@ -17,6 +17,9 @@ import {
   ArrowRight,
   Loader2,
   CheckCircle,
+  RefreshCw,
+  Download,
+  Trash2,
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import {
@@ -26,6 +29,10 @@ import {
   StorageStatus,
   SystemMetrics,
 } from "../../api/tauri";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+
+const APP_VERSION = "0.1.0";
 
 function formatSpeed(mbps: number): string {
   if (mbps < 0.1) return `${(mbps * 1000).toFixed(0)} Kbps`;
@@ -51,6 +58,15 @@ export function SettingsPanel() {
     success: boolean;
     message: string;
   } | null>(null);
+
+  // Update state
+  type UpdateStatus = "idle" | "checking" | "up-to-date" | "available" | "downloading" | "error";
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState(0);
+
+  // Factory reset state
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     CitinetAPI.getHardwareInfo().then(setHwInfo).catch(console.error);
@@ -111,6 +127,61 @@ export function SettingsPanel() {
           Math.round((storageStatus.used_gb / contribution.diskSpaceGB) * 100)
         )
       : 0;
+
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus("checking");
+    setUpdateVersion(null);
+    try {
+      const update = await check();
+      if (update?.available) {
+        setUpdateStatus("available");
+        setUpdateVersion(update.version);
+      } else {
+        setUpdateStatus("up-to-date");
+      }
+    } catch {
+      setUpdateStatus("error");
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateStatus("downloading");
+    setUpdateProgress(0);
+    try {
+      const update = await check();
+      if (!update?.available) return;
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setUpdateProgress(total > 0 ? Math.round((downloaded / total) * 100) : 0);
+        }
+      });
+      await relaunch();
+    } catch {
+      setUpdateStatus("error");
+    }
+  };
+
+  const handleFactoryReset = async () => {
+    if (!confirm(
+      "Factory Reset will permanently delete all Citinet data:\n\n" +
+      "• All stored files\n• All users and accounts\n• Node configuration\n• Tunnel settings\n\n" +
+      "The app will restart and run the setup wizard fresh.\n\n" +
+      "Your data directory will NOT be deleted from disk — only the Citinet database and stored files are cleared.\n\n" +
+      "This cannot be undone. Continue?"
+    )) return;
+
+    setResetting(true);
+    try {
+      await CitinetAPI.factoryReset();
+    } catch (err) {
+      console.error("Factory reset failed:", err);
+      setResetting(false);
+    }
+  };
 
   const handleRelocate = async () => {
     if (!newPath.trim()) return;
@@ -574,7 +645,7 @@ export function SettingsPanel() {
           <div className="flex justify-between">
             <span className="text-[var(--text-secondary)]">App Version</span>
             <span className="text-[var(--text-primary)] font-medium">
-              0.1.0
+              {APP_VERSION}
             </span>
           </div>
           {hwInfo && (
@@ -585,6 +656,109 @@ export function SettingsPanel() {
               </span>
             </div>
           )}
+        </div>
+      </Card>
+
+      {/* Updates */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-primary-500" />
+            <h3 className="text-sm font-medium text-[var(--text-secondary)]">Updates</h3>
+          </div>
+          <span className="text-xs text-[var(--text-muted)]">v{APP_VERSION}</span>
+        </div>
+
+        <div className="space-y-3">
+          {updateStatus === "idle" && (
+            <Button size="sm" variant="secondary" onClick={handleCheckForUpdates} className="w-full">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Check for Updates
+            </Button>
+          )}
+
+          {updateStatus === "checking" && (
+            <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+              Checking for updates…
+            </div>
+          )}
+
+          {updateStatus === "up-to-date" && (
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle className="w-4 h-4 text-accent-500" />
+              <span className="text-[var(--text-primary)]">You're up to date</span>
+              <button onClick={() => setUpdateStatus("idle")} className="ml-auto text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                Check again
+              </button>
+            </div>
+          )}
+
+          {updateStatus === "available" && updateVersion && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Download className="w-4 h-4 text-primary-500" />
+                <span className="text-[var(--text-primary)]">
+                  Update available: <span className="font-medium text-primary-500">v{updateVersion}</span>
+                </span>
+              </div>
+              <Button size="sm" onClick={handleInstallUpdate} className="w-full">
+                <Download className="w-4 h-4 mr-2" />
+                Install & Restart
+              </Button>
+            </div>
+          )}
+
+          {updateStatus === "downloading" && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                <Loader2 className="w-4 h-4 animate-spin text-primary-500" />
+                Downloading update… {updateProgress > 0 ? `${updateProgress}%` : ""}
+              </div>
+              {updateProgress > 0 && (
+                <ProgressBar value={updateProgress} showPercent={false} color="primary" />
+              )}
+            </div>
+          )}
+
+          {updateStatus === "error" && (
+            <div className="flex items-center gap-2 text-sm">
+              <AlertCircle className="w-4 h-4 text-red-500" />
+              <span className="text-red-500">Could not check for updates</span>
+              <button onClick={() => setUpdateStatus("idle")} className="ml-auto text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Danger Zone */}
+      <Card className="border-red-500/30 dark:border-red-500/20">
+        <div className="flex items-center gap-2 mb-4">
+          <Trash2 className="w-4 h-4 text-red-500" />
+          <h3 className="text-sm font-medium text-red-500">Danger Zone</h3>
+        </div>
+        <div className="space-y-3">
+          <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+            <p className="text-sm font-medium text-[var(--text-primary)] mb-1">Factory Reset</p>
+            <p className="text-xs text-[var(--text-muted)] mb-3">
+              Deletes all users, files, and configuration. The setup wizard will run on next launch.
+              Your data folder is not removed from disk.
+            </p>
+            <Button
+              size="sm"
+              onClick={handleFactoryReset}
+              disabled={resetting}
+              className="w-full !bg-red-600 hover:!bg-red-700 !text-white"
+            >
+              {resetting ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Resetting…</>
+              ) : (
+                <><Trash2 className="w-4 h-4 mr-2" />Factory Reset</>
+              )}
+            </Button>
+          </div>
         </div>
       </Card>
     </div>

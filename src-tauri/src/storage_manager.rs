@@ -1302,6 +1302,34 @@ impl StorageManager {
         }
         Ok(messages)
     }
+
+    /// Factory reset: wipe all data from the database and delete the storage directory.
+    /// The database file itself is preserved so the app can reinitialize on next launch.
+    /// The wizard runs fresh because node_config will be empty.
+    pub fn factory_reset(&mut self) -> Result<()> {
+        // Wipe all tables — order matters for foreign key constraints
+        self.db.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             DELETE FROM messages;
+             DELETE FROM message_attachments;
+             DELETE FROM conversation_members;
+             DELETE FROM conversations;
+             DELETE FROM files;
+             DELETE FROM spaces;
+             DELETE FROM users;
+             DELETE FROM tunnel_config;
+             DELETE FROM node_config;
+             PRAGMA foreign_keys = ON;"
+        ).context("Failed to wipe database")?;
+
+        // Delete all uploaded files from disk
+        let storage_dir = self.install_path.join("storage");
+        if storage_dir.exists() {
+            let _ = fs::remove_dir_all(&storage_dir);
+        }
+
+        Ok(())
+    }
 }
 
 fn mime_from_ext(name: &str) -> String {

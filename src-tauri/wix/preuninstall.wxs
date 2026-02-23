@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pre-uninstall cleanup fragment.
+  Runs before Windows removes Citinet files:
+    1. Kills any running Citinet process (releases file locks)
+    2. Kills any running cloudflared tunnel process
+    3. Removes the Citinet auto-start registry entry
+  User data (files, database) is NOT deleted — preserved for reinstall.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <CustomAction
+      Id="PreUninstallCleanup"
+      Execute="deferred"
+      Return="ignore"
+      Impersonate="no"
+      Directory="SystemFolder"
+      ExeCommand="&quot;[SystemFolder]cmd.exe&quot; /C &quot;taskkill /F /IM Citinet.exe 2&gt;nul &amp; taskkill /F /IM cloudflared.exe 2&gt;nul &amp; reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Citinet /f 2&gt;nul&quot;"
+    />
+
+    <InstallExecuteSequence>
+      <Custom Action="PreUninstallCleanup" Before="RemoveFiles">REMOVE="ALL"</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

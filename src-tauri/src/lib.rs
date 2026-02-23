@@ -508,6 +508,37 @@ fn make_slug(name: &str) -> String {
 }
 
 #[tauri::command]
+async fn factory_reset(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // Stop the tunnel (best effort)
+    {
+        let mut tm = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(ref mut tunnel) = *tm {
+            let _ = tunnel.stop_tunnel();
+        }
+    }
+
+    // Disable auto-start (best effort)
+    let _ = app_handle.autolaunch().disable();
+
+    // Wipe the database and storage directory
+    {
+        let mut sm = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(ref mut storage) = *sm {
+            storage.factory_reset().map_err(|e| e.to_string())?;
+        } else {
+            return Err("Storage not initialized".to_string());
+        }
+    }
+
+    // Exit — wizard runs fresh on next launch
+    app_handle.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn register_hub(state: State<AppState>) -> Result<(), String> {
     let secret = option_env!("REGISTRY_SECRET")
         .ok_or("Registry not configured in this build (REGISTRY_SECRET not set)")?;
@@ -626,6 +657,8 @@ pub fn run() {
     let bg_mode_for_close = background_mode.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -671,7 +704,8 @@ pub fn run() {
             stop_tunnel,
             get_tunnel_status,
             register_hub,
-            deregister_hub
+            deregister_hub,
+            factory_reset
         ])
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
