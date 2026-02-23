@@ -33,6 +33,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -52,7 +53,7 @@
       "endpoints": [
         "https://github.com/fergtech/citinet-client/releases/latest/download/update.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGQURERjQ2RTM0QkREOEMKUldTTTNVdmpSdCt0ajdkT1dNNnRtS1lwNDFpcnhmQ0p4QjhrNXRhMnd4d1pFdTRoeUtjcW5vOFUK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDNkUzQTdENEU3MjE4QTIKUldTaUdISk9mVHB1TEhRL0E2MHF5MXl1NjZMazdEZTdwRFg3MDdBai9YOUVXSGg0K1JDYk10Y1cK"
     }
   }
 }
