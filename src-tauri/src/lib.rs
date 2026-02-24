@@ -404,13 +404,47 @@ fn start_quick_tunnel(state: State<AppState>, local_port: u16) -> Result<String,
         );
     }
 
-    let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
-    let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+    // Extract node info and install path before acquiring tunnel manager lock
+    let (node_id, node_name, install_path) = {
+        let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+        let config = sm.get_node_config().map_err(|e| e.to_string())?
+            .ok_or("Node not configured")?;
+        (config.node_id, config.node_name, sm.install_path().to_path_buf())
+    };
 
-    let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
-    let tm = tm_lock.get_or_insert_with(|| TunnelManager::new(sm.install_path()));
+    let tunnel_url = {
+        let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        let tm = tm_lock.get_or_insert_with(|| TunnelManager::new(&install_path));
+        tm.start_quick_tunnel(local_port).map_err(|e| e.to_string())?
+    };
 
-    tm.start_quick_tunnel(local_port).map_err(|e| e.to_string())
+    // Auto-register with registry on every tunnel start (fire-and-forget).
+    // This keeps the registry tunnel_url current even when quick tunnel URL rotates.
+    if let Some(secret) = option_env!("REGISTRY_SECRET") {
+        let url = tunnel_url.clone();
+        let secret = secret.to_string();
+        let id = node_id.clone();
+        let name = node_name.clone();
+        std::thread::spawn(move || {
+            let slug = make_slug(&name);
+            let payload = serde_json::json!({
+                "id": id,
+                "name": name,
+                "slug": slug,
+                "tunnel_url": url,
+                "online": true,
+            });
+            let client = reqwest::blocking::Client::new();
+            let _ = client
+                .post("https://registry.citinet.cloud/hubs")
+                .header("Authorization", format!("Bearer {}", secret))
+                .json(&payload)
+                .send();
+        });
+    }
+
+    Ok(tunnel_url)
 }
 
 #[tauri::command]
