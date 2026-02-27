@@ -92,6 +92,15 @@ export interface CloudflaredStatus {
   error: string | null;
 }
 
+export interface TailscaleStatus {
+  installed: boolean;
+  logged_in: boolean;
+  machine_name: string | null;
+  /** Stable HTTPS URL derived from the Tailscale machine name, e.g. https://machinename.tail12345.ts.net */
+  funnel_url: string | null;
+  funnel_active: boolean;
+}
+
 export interface TunnelConfig {
   tunnel_id: string;
   tunnel_name: string;
@@ -273,6 +282,33 @@ export class CitinetAPI {
 
   static async getTunnelStatus(): Promise<TunnelStatus> {
     return await invoke<TunnelStatus>("get_tunnel_status");
+  }
+
+  // --- Tailscale commands ---
+
+  static async checkTailscale(): Promise<TailscaleStatus> {
+    return await invoke<TailscaleStatus>("check_tailscale");
+  }
+
+  static async installTailscale(): Promise<string> {
+    return await invoke<string>("install_tailscale");
+  }
+
+  /** Returns the auth URL that was extracted from tailscale login output (may be empty if already logged in). */
+  static async startTailscaleLogin(): Promise<string> {
+    return await invoke<string>("start_tailscale_login");
+  }
+
+  static async pollTailscaleLogin(): Promise<boolean> {
+    return await invoke<boolean>("poll_tailscale_login");
+  }
+
+  static async startTailscaleFunnel(port: number): Promise<string> {
+    return await invoke<string>("start_tailscale_funnel", { port });
+  }
+
+  static async stopTailscaleFunnel(): Promise<void> {
+    return await invoke("stop_tailscale_funnel");
   }
 
   // --- Registry commands ---

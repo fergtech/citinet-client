@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card } from "../ui/Card";
-import { CitinetAPI, TunnelStatus, User } from "../../api/tauri";
+import { CitinetAPI, TailscaleStatus, TunnelStatus, User } from "../../api/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
   Globe, Link, Loader2, CheckCircle2, AlertCircle, Copy, Check,
@@ -9,7 +9,7 @@ import {
 
 // --- Tunnel Section ---
 
-type TunnelMode = "choose" | "quick" | "custom";
+type TunnelMode = "choose" | "quick" | "custom" | "tailscale";
 type SetupPhase = "idle" | "connecting" | "done" | "error";
 
 interface SetupStep {
@@ -35,6 +35,10 @@ function TunnelSection() {
   const [customHostname, setCustomHostname] = useState("");
   const [steps, setSteps] = useState<SetupStep[]>([]);
   const [copied, setCopied] = useState(false);
+
+  // Tailscale-specific state (used only during setup; after setup mode="tailscale" is stored)
+  const [tsStatus, setTsStatus] = useState<TailscaleStatus | null>(null);
+  const [tsLoginUrl, setTsLoginUrl] = useState<string | null>(null);
 
   const nodeName = useConfigStore((s) => s.nodeName);
   const tunnelSlug = generateSlug(nodeName || "citinet-hub");
@@ -188,10 +192,113 @@ function TunnelSection() {
     }
   };
 
+  // Tailscale Funnel: check install, login if needed, enable funnel
+  const handleTailscaleConnect = async () => {
+    setMode("tailscale");
+    setSetupPhase("connecting");
+
+    let currentSteps: SetupStep[] = [
+      { label: "Checking Tailscale installation", status: "pending" },
+      { label: "Sign in to Tailscale", status: "pending" },
+      { label: "Enabling Tailscale Funnel", status: "pending" },
+    ];
+    setSteps(currentSteps);
+
+    // Step 1: Check / install Tailscale
+    currentSteps = updateStep(0, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    let ts: TailscaleStatus;
+    try {
+      ts = await CitinetAPI.checkTailscale();
+      setTsStatus(ts);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(0, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+      return;
+    }
+
+    if (!ts.installed) {
+      currentSteps = updateStep(0, { label: "Installing Tailscale...", status: "running" }, currentSteps);
+      setSteps(currentSteps);
+      try {
+        await CitinetAPI.installTailscale();
+        ts = await CitinetAPI.checkTailscale();
+        setTsStatus(ts);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        currentSteps = updateStep(0, { status: "failed", error: msg }, currentSteps);
+        setSteps(currentSteps);
+        setSetupPhase("error");
+        return;
+      }
+    }
+    currentSteps = updateStep(0, { label: "Tailscale installed", status: "done" }, currentSteps);
+    setSteps(currentSteps);
+
+    // Step 2: Login if not already authenticated
+    if (!ts.logged_in) {
+      // Show "check browser" immediately — do NOT await startTailscaleLogin.
+      // The Tailscale tray often opens the browser directly; we poll BackendState
+      // independently so detection is never blocked on CLI output.
+      currentSteps = updateStep(1, { label: "Check your browser or Tailscale taskbar icon", status: "running" }, currentSteps);
+      setSteps(currentSteps);
+
+      // Fire-and-forget: kicks off tailscale up + login, captures URL if CLI prints it
+      CitinetAPI.startTailscaleLogin()
+        .then((url) => { if (url) setTsLoginUrl(url); })
+        .catch(() => {});
+
+      // Poll every 2 s for up to 3 minutes (90 attempts)
+      let loggedIn = false;
+      for (let i = 0; i < 90; i++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        loggedIn = await CitinetAPI.pollTailscaleLogin();
+        if (loggedIn) break;
+      }
+
+      if (!loggedIn) {
+        currentSteps = updateStep(1, { status: "failed", error: "Sign-in timed out. Please try again." }, currentSteps);
+        setSteps(currentSteps);
+        setSetupPhase("error");
+        return;
+      }
+
+      setTsLoginUrl(null); // clear fallback URL — sign-in complete
+      // Refresh status after successful login to get the machine DNS name
+      ts = await CitinetAPI.checkTailscale();
+      setTsStatus(ts);
+    }
+    currentSteps = updateStep(1, { label: "Signed in to Tailscale", status: "done" }, currentSteps);
+    setSteps(currentSteps);
+
+    // Step 3: Enable funnel
+    currentSteps = updateStep(2, { status: "running" }, currentSteps);
+    setSteps(currentSteps);
+    try {
+      const url = await CitinetAPI.startTailscaleFunnel(9090);
+      currentSteps = updateStep(2, { status: "done" }, currentSteps);
+      setSteps(currentSteps);
+      setPublicUrl(url);
+      setSetupPhase("done");
+      refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      currentSteps = updateStep(2, { status: "failed", error: msg }, currentSteps);
+      setSteps(currentSteps);
+      setSetupPhase("error");
+    }
+  };
+
   const handleStart = async () => {
     setActionLoading(true);
     try {
-      await CitinetAPI.startTunnel();
+      if (tunnelStatus?.config?.mode === "tailscale") {
+        await CitinetAPI.startTailscaleFunnel(tunnelStatus.config.local_port);
+      } else {
+        await CitinetAPI.startTunnel();
+      }
       refresh();
     } catch (e) {
       console.error(e);
@@ -203,7 +310,11 @@ function TunnelSection() {
   const handleStop = async () => {
     setActionLoading(true);
     try {
-      await CitinetAPI.stopTunnel();
+      if (tunnelStatus?.config?.mode === "tailscale") {
+        await CitinetAPI.stopTailscaleFunnel();
+      } else {
+        await CitinetAPI.stopTunnel();
+      }
       refresh();
     } catch (e) {
       console.error(e);
@@ -226,11 +337,17 @@ function TunnelSection() {
   // Already configured — show status + controls
   if (tunnelStatus?.configured && tunnelStatus.config) {
     const isQuick = tunnelStatus.config.mode === "quick";
+    const isTailscale = tunnelStatus.config.mode === "tailscale";
     return (
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Globe className="w-5 h-5 text-primary-500" />
           <h3 className="text-sm font-medium text-[var(--text-primary)]">Public Access</h3>
+          {isTailscale && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-500/20 text-accent-500 font-medium">
+              Tailscale Funnel
+            </span>
+          )}
           {isQuick && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-[var(--text-muted)]">
               Quick Tunnel
@@ -289,6 +406,12 @@ function TunnelSection() {
           </div>
         </div>
 
+        {isTailscale && (
+          <p className="text-xs text-accent-500 mt-3">
+            Stable URL — persists across restarts via Tailscale.
+            {!tunnelStatus.running && " Funnel may need to be re-enabled."}
+          </p>
+        )}
         {isQuick && (
           <p className="text-xs text-[var(--text-muted)] mt-3">
             Quick tunnel URL changes on restart. Set up a custom domain for a permanent URL.
@@ -302,7 +425,7 @@ function TunnelSection() {
               disabled={actionLoading}
               className="flex-1 py-2 px-4 rounded-lg bg-accent-500 text-white text-sm font-medium hover:bg-accent-600 transition-colors disabled:opacity-50"
             >
-              Start Tunnel
+              {isTailscale ? "Re-enable Funnel" : "Start Tunnel"}
             </button>
           ) : (
             <button
@@ -310,7 +433,7 @@ function TunnelSection() {
               disabled={actionLoading}
               className="flex-1 py-2 px-4 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
             >
-              Stop Tunnel
+              {isTailscale ? "Disable Funnel" : "Stop Tunnel"}
             </button>
           )}
         </div>
@@ -334,17 +457,32 @@ function TunnelSection() {
         {mode === "choose" && setupPhase === "idle" && (
           <div className="space-y-3">
             <button
-              onClick={handleQuickConnect}
+              onClick={handleTailscaleConnect}
               className="w-full p-4 rounded-lg border border-[var(--border-color)] hover:border-primary-500 transition-colors text-left"
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-medium text-[var(--text-primary)]">Quick Connect</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">Tailscale Funnel</span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-500/20 text-accent-500 font-medium">
                   Recommended
                 </span>
               </div>
               <p className="text-xs text-[var(--text-muted)]">
-                One click — get an instant public URL. No account needed. URL is temporary.
+                Stable, persistent URL that never changes. Works on IPv4 and IPv6 via Tailscale relay. Free account required.
+              </p>
+            </button>
+
+            <button
+              onClick={handleQuickConnect}
+              className="w-full p-4 rounded-lg border border-[var(--border-color)] hover:border-primary-500 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-[var(--text-primary)]">Quick Connect</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-[var(--text-muted)] text-[10px]">
+                  cloudflared
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                Instant public URL — no account needed. URL is temporary and changes on restart.
               </p>
             </button>
 
@@ -352,11 +490,14 @@ function TunnelSection() {
               onClick={() => setMode("custom")}
               className="w-full p-4 rounded-lg border border-[var(--border-color)] hover:border-primary-500 transition-colors text-left"
             >
-              <span className="text-sm font-medium text-[var(--text-primary)] block mb-1">
-                Custom Domain
-              </span>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-[var(--text-primary)]">Custom Domain</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-200 dark:bg-surface-700 text-[var(--text-muted)] text-[10px]">
+                  cloudflared
+                </span>
+              </div>
               <p className="text-xs text-[var(--text-muted)]">
-                Use your own domain for a permanent URL. Requires a Cloudflare account.
+                Permanent URL with your own domain. Requires a Cloudflare account.
               </p>
             </button>
           </div>
@@ -440,6 +581,32 @@ function TunnelSection() {
                 )}
               </div>
             ))}
+
+            {/* Fallback login URL — shown when browser didn't open automatically */}
+            {tsLoginUrl && setupPhase === "connecting" && (
+              <div className="p-3 rounded-lg bg-primary-500/10 border border-primary-500/30">
+                <p className="text-xs text-[var(--text-secondary)] mb-1.5">
+                  Browser didn't open? Visit this URL to sign in:
+                </p>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={tsLoginUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-xs text-primary-500 hover:underline break-all font-medium"
+                  >
+                    {tsLoginUrl}
+                  </a>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(tsLoginUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                    className="p-1.5 rounded-md hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors shrink-0"
+                    title="Copy URL"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-accent-500" /> : <Copy className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {setupPhase === "done" && publicUrl && (
               <div className="flex flex-col items-center gap-2 py-3">

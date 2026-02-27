@@ -371,15 +371,17 @@ impl TailscaleManager {
             });
         }
 
-        // Wait up to 65 seconds for any strategy to produce a URL
-        match rx.recv_timeout(Duration::from_secs(65)) {
+        // Wait up to 15 seconds for any strategy to produce a URL.
+        // The frontend fires this call without awaiting and polls login completion
+        // independently, so we only need enough time to capture the CLI-printed URL.
+        match rx.recv_timeout(Duration::from_secs(15)) {
             Ok(url) if !url.is_empty() => {
                 log::info!("Got Tailscale auth URL: {}", url);
                 Self::open_url_in_browser(&url);
                 Ok(url)
             }
             _ => {
-                log::warn!("Could not obtain Tailscale auth URL after 65 s — user may need to authenticate manually via the Tailscale tray/CLI");
+                log::info!("No auth URL captured within 15 s — browser likely opened via Tailscale tray");
                 Ok(String::new())
             }
         }

@@ -766,6 +766,48 @@ impl TunnelManager {
         self.config.as_ref()
     }
 
+    /// Save a Tailscale funnel entry into the tunnel_config table so that
+    /// `get_tunnel_status` and the auto-start logic can see it on next launch.
+    pub fn save_tailscale_config(&mut self, hostname: &str, local_port: u16) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let db = rusqlite::Connection::open(&self.db_path)
+            .context("Failed to open database")?;
+
+        let _ = db.execute("ALTER TABLE tunnel_config ADD COLUMN mode TEXT DEFAULT 'named'", []);
+        let _ = db.execute("ALTER TABLE tunnel_config ADD COLUMN tunnel_token TEXT DEFAULT ''", []);
+
+        let _ = db.execute("DELETE FROM tunnel_config", []);
+        db.execute(
+            "INSERT INTO tunnel_config
+                (tunnel_id, tunnel_name, hostname, local_port, api_token, credentials_path, config_path, created_at, updated_at, mode, tunnel_token)
+             VALUES ('tailscale', 'tailscale-funnel', ?1, ?2, '', '', '', ?3, ?3, 'tailscale', '')",
+            rusqlite::params![hostname, local_port as u32, now],
+        )
+        .context("Failed to save tailscale config")?;
+
+        self.config = Some(TunnelConfig {
+            tunnel_id: "tailscale".to_string(),
+            tunnel_name: "tailscale-funnel".to_string(),
+            hostname: hostname.to_string(),
+            local_port,
+            created_at: now,
+            mode: "tailscale".to_string(),
+            tunnel_token: String::new(),
+        });
+
+        Ok(())
+    }
+
+    /// Clear the tunnel config from both the database and in-memory state.
+    /// Used when disabling Tailscale Funnel so the next launch doesn't try to auto-start it.
+    pub fn clear_config(&mut self) -> Result<()> {
+        if let Ok(db) = rusqlite::Connection::open(&self.db_path) {
+            let _ = db.execute("DELETE FROM tunnel_config", []);
+        }
+        self.config = None;
+        Ok(())
+    }
+
     pub fn get_status(&mut self) -> TunnelStatus {
         let running = if let Some(ref mut child) = self.child {
             match child.try_wait() {

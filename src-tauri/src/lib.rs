@@ -1,6 +1,7 @@
 mod system_monitor;
 mod storage_manager;
 mod tunnel_manager;
+mod tailscale_manager;
 mod hub_api;
 mod auth;
 
@@ -13,6 +14,7 @@ use tauri_plugin_autostart::ManagerExt;
 use system_monitor::{SystemMetrics, SystemMonitor, HardwareInfo, DriveSpace};
 use storage_manager::{StorageManager, NodeConfig, StorageStatus, NodeStatus, File, User};
 use tunnel_manager::TunnelManager;
+use tailscale_manager::TailscaleManager;
 
 // Application state — Arc-wrapped so it can be shared with the axum API server
 struct AppState {
@@ -20,6 +22,9 @@ struct AppState {
     storage_manager: Arc<Mutex<Option<StorageManager>>>,
     tunnel_manager: Arc<Mutex<Option<TunnelManager>>>,
     tunnel_stopped_manually: Arc<Mutex<bool>>,
+    tailscale_manager: Arc<Mutex<TailscaleManager>>,
+    /// Port number of the active Tailscale Funnel, or None if not running.
+    tailscale_funnel_port: Arc<Mutex<Option<u16>>>,
     started_at: Instant,
 }
 
@@ -658,18 +663,141 @@ fn deregister_hub(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// --- Tailscale commands ---
+
+#[tauri::command]
+fn check_tailscale(state: State<AppState>) -> tailscale_manager::TailscaleStatus {
+    let ts = state.tailscale_manager.lock()
+        .unwrap_or_else(|e| e.into_inner());
+    ts.get_status()
+}
+
+#[tauri::command]
+fn install_tailscale(state: State<AppState>) -> Result<String, String> {
+    let ts = state.tailscale_manager.lock().map_err(|e| e.to_string())?;
+    ts.install().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn start_tailscale_login(state: State<AppState>) -> Result<String, String> {
+    let ts = state.tailscale_manager.lock().map_err(|e| e.to_string())?;
+    ts.start_login().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn poll_tailscale_login(state: State<AppState>) -> bool {
+    let ts = state.tailscale_manager.lock()
+        .unwrap_or_else(|e| e.into_inner());
+    ts.poll_login()
+}
+
+#[tauri::command]
+fn start_tailscale_funnel(state: State<AppState>, port: u16) -> Result<String, String> {
+    // Clear manual-stop flag so watchdog can monitor this funnel
+    if let Ok(mut flag) = state.tunnel_stopped_manually.lock() {
+        *flag = false;
+    }
+
+    // Extract node info for registry registration
+    let (node_id, node_name) = {
+        let sm_lock = state.storage_manager.lock().map_err(|e| e.to_string())?;
+        let sm = sm_lock.as_ref().ok_or("Node not initialized")?;
+        let config = sm.get_node_config().map_err(|e| e.to_string())?
+            .ok_or("Node not configured")?;
+        (config.node_id, config.node_name)
+    };
+
+    // Enable the funnel and get the stable URL
+    let tunnel_url = {
+        let ts = state.tailscale_manager.lock().map_err(|e| e.to_string())?;
+        ts.enable_funnel(port).map_err(|e| e.to_string())?
+    };
+
+    // Persist the Tailscale config to TunnelManager's SQLite so the status API
+    // and auto-start on next launch are aware of the Tailscale mode.
+    {
+        let hostname = tunnel_url.trim_start_matches("https://").to_string();
+        let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+        if let Some(tm) = tm_lock.as_mut() {
+            let _ = tm.save_tailscale_config(&hostname, port);
+        }
+    }
+
+    // Track the active funnel port for the watchdog
+    if let Ok(mut fp) = state.tailscale_funnel_port.lock() {
+        *fp = Some(port);
+    }
+
+    // Auto-register with citinet.cloud registry (fire-and-forget)
+    if let Some(secret) = option_env!("REGISTRY_SECRET") {
+        let url = tunnel_url.clone();
+        let secret = secret.to_string();
+        let id = node_id.clone();
+        let name = node_name.clone();
+        std::thread::spawn(move || {
+            let slug = make_slug(&name);
+            let payload = serde_json::json!({
+                "id": id,
+                "name": name,
+                "slug": slug,
+                "tunnel_url": url,
+                "online": true,
+            });
+            let client = reqwest::blocking::Client::new();
+            let _ = client
+                .post("https://registry.citinet.cloud/hubs")
+                .header("Authorization", format!("Bearer {}", secret))
+                .json(&payload)
+                .send();
+        });
+    }
+
+    Ok(tunnel_url)
+}
+
+#[tauri::command]
+fn stop_tailscale_funnel(state: State<AppState>) -> Result<(), String> {
+    // Disable the funnel via the Tailscale daemon
+    {
+        let ts = state.tailscale_manager.lock().map_err(|e| e.to_string())?;
+        ts.disable_funnel().map_err(|e| e.to_string())?;
+    }
+
+    // Clear the funnel port so the watchdog won't try to restart it
+    if let Ok(mut fp) = state.tailscale_funnel_port.lock() {
+        *fp = None;
+    }
+
+    // Remove Tailscale config from TunnelManager so next launch doesn't auto-start it
+    let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
+    if let Some(tm) = tm_lock.as_mut() {
+        let _ = tm.clear_config();
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn get_tunnel_status(state: State<AppState>) -> Result<tunnel_manager::TunnelStatus, String> {
     let mut tm_lock = state.tunnel_manager.lock().map_err(|e| e.to_string())?;
-    match tm_lock.as_mut() {
-        Some(tm) => Ok(tm.get_status()),
-        None => Ok(tunnel_manager::TunnelStatus {
+    let mut status = match tm_lock.as_mut() {
+        Some(tm) => tm.get_status(),
+        None => tunnel_manager::TunnelStatus {
             configured: false,
             running: false,
             config: None,
             error: None,
-        }),
+        },
+    };
+
+    // For Tailscale mode, determine running status from the Tailscale daemon
+    // (no child process to probe) rather than from TunnelManager's child tracking.
+    if status.config.as_ref().map_or(false, |c| c.mode == "tailscale") {
+        let ts = state.tailscale_manager.lock().map_err(|e| e.to_string())?;
+        status.running = ts.is_funnel_active();
     }
+
+    Ok(status)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -678,6 +806,8 @@ pub fn run() {
     let storage_manager = Arc::new(Mutex::new(None::<StorageManager>));
     let tunnel_manager = Arc::new(Mutex::new(None::<TunnelManager>));
     let tunnel_stopped_manually = Arc::new(Mutex::new(false));
+    let tailscale_manager = Arc::new(Mutex::new(TailscaleManager::new()));
+    let tailscale_funnel_port = Arc::new(Mutex::new(None::<u16>));
     let monitor = Arc::new(Mutex::new(SystemMonitor::new()));
     let background_mode = Arc::new(Mutex::new(true)); // default: minimize to tray
 
@@ -686,7 +816,11 @@ pub fn run() {
     let api_tm = tunnel_manager.clone();
     let watchdog_stopped_flag = tunnel_stopped_manually.clone();
     let watchdog_tm = tunnel_manager.clone();
+    let watchdog_ts = tailscale_manager.clone();
+    let watchdog_ts_port = tailscale_funnel_port.clone();
     let autostart_tm = tunnel_manager.clone();
+    let autostart_ts = tailscale_manager.clone();
+    let autostart_ts_port = tailscale_funnel_port.clone();
     let autostart_stopped_flag = tunnel_stopped_manually.clone();
     let bg_mode_for_close = background_mode.clone();
 
@@ -702,6 +836,8 @@ pub fn run() {
             storage_manager,
             tunnel_manager,
             tunnel_stopped_manually,
+            tailscale_manager,
+            tailscale_funnel_port,
             started_at,
         })
         .manage(BackgroundModeState(background_mode))
@@ -737,6 +873,12 @@ pub fn run() {
             start_tunnel,
             stop_tunnel,
             get_tunnel_status,
+            check_tailscale,
+            install_tailscale,
+            start_tailscale_login,
+            poll_tailscale_login,
+            start_tailscale_funnel,
+            stop_tailscale_funnel,
             register_hub,
             deregister_hub,
             factory_reset
@@ -914,20 +1056,39 @@ pub fn run() {
 
                 if let Some(config) = has_config {
                     log::info!("Auto-starting tunnel (mode: {}, port: {})", config.mode, config.local_port);
-                    let mut tm_lock = match autostart_tm.lock() {
-                        Ok(l) => l,
-                        Err(_) => return,
-                    };
-                    if let Some(tm) = tm_lock.as_mut() {
-                        match tm.start_tunnel() {
-                            Ok(_) => {
-                                // Clear manual-stop flag so watchdog can monitor
-                                if let Ok(mut flag) = autostart_stopped_flag.lock() {
-                                    *flag = false;
+
+                    if config.mode == "tailscale" {
+                        // Tailscale funnel: re-enable via the Tailscale daemon
+                        let ts = match autostart_ts.lock() {
+                            Ok(l) => l,
+                            Err(_) => return,
+                        };
+                        match ts.enable_funnel(config.local_port) {
+                            Ok(url) => {
+                                if let Ok(mut fp) = autostart_ts_port.lock() {
+                                    *fp = Some(config.local_port);
                                 }
-                                log::info!("Tunnel auto-started successfully");
+                                log::info!("Tailscale Funnel auto-started: {}", url);
                             }
-                            Err(e) => log::error!("Tunnel auto-start failed: {}", e),
+                            Err(e) => log::error!("Tailscale Funnel auto-start failed: {}", e),
+                        }
+                    } else {
+                        // Cloudflare tunnel (quick or named)
+                        let mut tm_lock = match autostart_tm.lock() {
+                            Ok(l) => l,
+                            Err(_) => return,
+                        };
+                        if let Some(tm) = tm_lock.as_mut() {
+                            match tm.start_tunnel() {
+                                Ok(_) => {
+                                    // Clear manual-stop flag so watchdog can monitor
+                                    if let Ok(mut flag) = autostart_stopped_flag.lock() {
+                                        *flag = false;
+                                    }
+                                    log::info!("Tunnel auto-started successfully");
+                                }
+                                Err(e) => log::error!("Tunnel auto-start failed: {}", e),
+                            }
                         }
                     }
                 }
@@ -979,6 +1140,30 @@ pub fn run() {
                                     was_running = true;
                                 }
                                 Err(e) => log::error!("Tunnel auto-restart failed: {}", e),
+                            }
+                        }
+                    }
+
+                    // Tailscale Funnel health check — runs independently of the cloudflare watchdog.
+                    // If the funnel should be active (port is set) but isn't, re-enable it.
+                    let ts_port = watchdog_ts_port.lock().map(|p| *p).unwrap_or(None);
+                    if let Some(port) = ts_port {
+                        let is_active = {
+                            let ts = match watchdog_ts.lock() {
+                                Ok(l) => l,
+                                Err(_) => continue,
+                            };
+                            ts.is_funnel_active()
+                        };
+                        if !is_active {
+                            log::warn!("Tailscale Funnel is inactive — re-enabling on port {}...", port);
+                            let ts = match watchdog_ts.lock() {
+                                Ok(l) => l,
+                                Err(_) => continue,
+                            };
+                            match ts.enable_funnel(port) {
+                                Ok(url) => log::info!("Tailscale Funnel re-enabled: {}", url),
+                                Err(e) => log::error!("Tailscale Funnel re-enable failed: {}", e),
                             }
                         }
                     }
