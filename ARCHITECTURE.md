@@ -2,7 +2,9 @@
 
 ## Overview
 
-Citinet is a decentralized mesh network application built with Tauri 2, combining a React TypeScript frontend with a Rust backend. The architecture supports three distinct node types that work together to create a community-owned network infrastructure.
+Citinet is a web-first community network platform. A **hub** is a Docker Compose stack that any machine (PC, Raspberry Pi, VPS, or NAS) can run. The hub exposes a local HTTP API on port 9090, and a public access tunnel (Tailscale Funnel, Cloudflare, or a reverse proxy) makes it reachable on the internet. Community members connect through a browser at `{slug}.citinet.cloud` — no installation required.
+
+This **citinet-client** desktop app is the hub operator's management interface: a Tauri 2 + React Windows app that handles Docker lifecycle, tunnel setup, user management, and hub configuration. It is an admin/operator tool, not a client app for community members.
 
 ---
 
@@ -24,21 +26,19 @@ Citinet is a decentralized mesh network application built with Tauri 2, combinin
 
 **Software Mode**: Runs with `node_type: 'hub'`
 
-### 2. Client Node (Participant Device)
+### 2. Web Client (Browser-Based Participant)
 
 **Purpose**: Connects to Hub Nodes to use services
 
-**Hardware**: Phone, laptop, desktop computer
+**Hardware**: Any device with a browser
 
 **Capabilities**:
-- Discovers Hub Nodes on local network
-- Consumes services from connected hubs
-- Stores local keys and preferences
-- Minimal resource contribution
+- Discovers hubs via the citinet.cloud registry
+- Accesses hub services (files, messaging, discussions) via web portal
+- No installation required — opens `start.citinet.cloud` and joins
+- Bookmarks hub at `{slug}.citinet.cloud`
 
-**Deployment**: Personal devices
-
-**Software Mode**: Runs with `node_type: 'client'`
+**Deployment**: `start.citinet.cloud` / `{slug}.citinet.cloud` (hosted on Vercel + CF Workers)
 
 ### 3. Personal Node (Optional Sovereign Device)
 
@@ -205,37 +205,37 @@ Citinet is a decentralized mesh network application built with Tauri 2, combinin
 
 ## Implementation Status
 
-### ✅ Completed (Phase 1)
+### ✅ Completed
 
-- [x] Rust dependencies for system monitoring and networking
-- [x] Node type configuration in stores
-- [x] Real system resource monitoring (CPU, memory, disk, network)
-- [x] Hub Node mDNS broadcasting
-- [x] Client Node mDNS discovery
-- [x] Frontend connected to real backend metrics
-- [x] Resource contribution settings UI
-- [x] Hardware detection (Raspberry Pi vs PC)
+- [x] Hub setup wizard (node naming, storage allocation, admin account)
+- [x] Docker Compose lifecycle management (start, stop, status)
+- [x] Embedded axum HTTP API server on port 9090
+- [x] User authentication (bcrypt + JWT)
+- [x] File storage (upload/download/delete/visibility toggle)
+- [x] Real-time messaging (WebSocket, DMs + group conversations)
+- [x] Cloudflare Quick Tunnel + Custom Domain tunnel modes
+- [x] Tailscale Funnel (stable IPv4+IPv6 URL, recommended gateway)
+- [x] Tunnel auto-start + watchdog (restarts crashed tunnels every 30s)
+- [x] Hub registry auto-registration on every tunnel start
+- [x] System monitoring (CPU, memory, disk, network metrics)
+- [x] Auto-start on boot, background/tray mode
+- [x] Feature flag system (profile-based per node type)
+- [x] Factory reset, auto-updater
 
-### 🚧 In Progress (Phase 2)
+### 🚧 In Progress
 
-- [ ] Enforce resource contribution limits in backend
-- [ ] Persistent configuration file (JSON/TOML)
-- [ ] File storage management for Hub Nodes
-- [ ] Personal Node sync engine
-- [ ] Connection management (Client → Hub)
-- [ ] Service health checks
+- [ ] Web-based admin panel (manage hub config, users, tunnels from the browser)
+- [ ] Hub-served web app (Docker stack serves web portal for offline/local access)
 
-### 📋 Planned (Phase 3+)
+### 📋 Planned
 
-- [ ] ISP/bandwidth sharing
-- [ ] Encrypted peer-to-peer connections (WireGuard)
-- [ ] Yggdrasil overlay network integration
+- [ ] Simplified one-click launcher (Python/Tkinter) for non-technical hub operators
+- [ ] Personal Node sync engine (local-first data storage)
 - [ ] ActivityPub federation for social features
 - [ ] Matrix server integration for messaging
-- [ ] Keycloak/OIDC for identity management
-- [ ] Nextcloud integration for file storage
-- [ ] Mobile app (React Native) for Client Nodes
-- [ ] Raspberry Pi OS image with auto-setup
+- [ ] Encrypted peer-to-peer connections (WireGuard)
+- [ ] Mobile-first improvements to web portal
+- [ ] Linux / Raspberry Pi hub management app
 
 ---
 
@@ -450,7 +450,7 @@ cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm")
 ### Installation (Future)
 ```bash
 # Download Citinet ARM binary
-curl -L citinet.io/pi -o citinet-arm64
+curl -L citinet.cloud/pi -o citinet-arm64
 
 # Install as systemd service
 sudo cp citinet-arm64 /usr/local/bin/citinet
@@ -490,4 +490,4 @@ When adding features:
 
 ---
 
-**Last Updated**: Phase 1 Implementation (February 2026)
+**Last Updated**: Web-first pivot — February 2026

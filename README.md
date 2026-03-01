@@ -3,21 +3,28 @@
 
 **People-powered cloud — digital infrastructure owned by neighbors, not corporations.**
 
-Citinet (Citizens' Inter-networking) lets a community run its own cloud. A hub admin installs this desktop app, allocates storage, and optionally connects a Cloudflare Tunnel so members can access their hub from anywhere — similar to how Jellyfin + Cloudflare Tunnel works, but for community file storage and services.
+Citinet (Citizens' Inter-networking) lets a community run its own cloud. This desktop app is the **hub management tool** for Windows operators: it sets up and monitors the hub's Docker stack, configures public access via Tailscale Funnel or Cloudflare, and registers the hub with the citinet.cloud directory. Community members access hubs through the browser at `{slug}.citinet.cloud` — no client installation needed.
+
+> **Coming soon:** A simplified one-click launcher for non-technical hub operators (no terminal, no Docker knowledge required).
 
 ---
 
 ## How It Works
 
 ```
-Hub Admin installs Citinet desktop app
-  → 10-step wizard configures the node
+Hub operator runs Citinet desktop app
+  → Wizard configures the node (name, storage, admin account)
+  → Docker Compose starts the hub stack
   → Embedded HTTP API starts on port 9090
-  → (Optional) Cloudflare Tunnel exposes the hub publicly
-  → Community members access via web app or desktop login
+  → Operator connects a tunnel:
+      Tailscale Funnel  → stable https://name.tailXXXX.ts.net  (recommended)
+      Cloudflare Tunnel → permanent custom domain at {name}.citinet.cloud
+      Local-only        → accessible only on the local network
+  → Hub auto-registers with registry.citinet.cloud
+  → Community members access via browser at slug.citinet.cloud
 ```
 
-The desktop app is both the **admin dashboard** and the **backend server**. It runs an embedded axum HTTP API that serves files and handles authentication. When a Cloudflare Tunnel is connected, the hub becomes reachable at a public URL (e.g., `https://your-hub.trycloudflare.com` or a custom domain like `hub.citinet.cloud`).
+The desktop app is both the **operator dashboard** and the **hub backend server**. It runs an embedded axum HTTP API that serves files, handles authentication, and supports real-time messaging. The Tailscale Funnel provides a stable, IPv4+IPv6-reachable URL that persists across restarts — no Cloudflare account needed.
 
 ---
 
@@ -29,7 +36,7 @@ The desktop app is both the **admin dashboard** and the **backend server**. It r
 - **File storage** — upload, download, delete with per-user ownership and public/private visibility
 - **File visibility toggle** — move files between private (My Drive) and shared (public) drives
 - **Real-time messaging** — DM and group conversations with WebSocket push, message history, and member management
-- **Cloudflare Tunnel** — two modes: Quick Tunnel (temporary trycloudflare.com URL) and Custom Domain (API-managed, permanent)
+- **Tunnel options** — three modes: Tailscale Funnel (stable URL, recommended), Quick Tunnel (temporary trycloudflare.com URL), and Custom Domain (API-managed Cloudflare tunnel, permanent)
 - **Tunnel auto-start & watchdog** — previously configured tunnels auto-start on launch; watchdog auto-restarts crashed tunnels every 30s
 - **User management** — admin can list users, promote/demote admins, delete accounts
 - **HTTP API** — embedded axum server on port 9090 with REST endpoints for auth, files, messaging, and node status
@@ -213,5 +220,6 @@ See [PRIVACY.md](./PRIVACY.md) for full details.
 
 ## Related Citinet Repositories
 
-- [citinet](https://github.com/fergtech/citinet): Core hub and network backend
+- [citinet](https://github.com/fergtech/citinet): Web portal — browser-based hub access for community members
 - [citinet-info](https://github.com/fergtech/citinet-info): The informational companion site to the Citinet project
+- [citinet-registry](https://github.com/fergtech/citinet-registry): Hub registry Cloudflare Worker

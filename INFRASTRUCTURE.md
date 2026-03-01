@@ -26,13 +26,14 @@ This document describes the full infrastructure landscape for the Citinet projec
 - **Deploy:** `npx wrangler deploy` (manual, requires CF API token)
 - **Purpose:** Central directory of active hubs — stores slug, name, tunnel URL, online status.
 
-### 4. Desktop Hub Client — this repo (`fergtech/citinet-client`)
+### 4. Hub Management App — this repo (`fergtech/citinet-client`)
 - **Framework:** Tauri 2 (Rust backend) + React 19 (frontend) + Tailwind CSS
 - **Platform:** Windows (.msi installer, WiX toolset)
 - **Distribution:** GitHub Releases
 - **Auto-update endpoint:** `https://github.com/fergtech/citinet-client/releases/latest/download/update.json`
 - **Signing:** minisign keypair — `TAURI_SIGNING_PRIVATE_KEY` env var required at build time (CRLF-stripped)
-- **Purpose:** Runs on the hub operator's Windows machine. Manages the local hub server, Docker containers, Cloudflare tunnels, and registry registration.
+- **Purpose:** Hub operator management tool. Manages Docker containers (the hub stack), configures public access (Tailscale Funnel recommended, Cloudflare Tunnel, or custom gateway), exposes a local API on port 9090, and auto-registers the hub with the registry. Community members access hubs through the web portal — this app is for operators only.
+- **Coming soon:** Simplified one-click launcher for non-technical operators.
 
 ---
 
@@ -44,9 +45,10 @@ This document describes the full infrastructure landscape for the Citinet projec
 |--------|------|---------|
 | Storage | `src-tauri/src/storage_manager.rs` | SQLite + dir management, node config CRUD |
 | Docker | `src-tauri/src/docker_manager.rs` | Stateless Docker CLI wrapper |
-| Tunnel | `src-tauri/src/tunnel_manager.rs` | Cloudflare quick tunnel orchestration |
+| Tunnel | `src-tauri/src/tunnel_manager.rs` | Cloudflare quick/named tunnel orchestration |
+| Tailscale | `src-tauri/src/tailscale_manager.rs` | Tailscale install, login, and Funnel management |
 | Hub API | `src-tauri/src/hub_api/` | Local HTTP API server on port 9090 |
-| Commands | `src-tauri/src/lib.rs` | 23 Tauri IPC commands exposed to frontend |
+| Commands | `src-tauri/src/lib.rs` | 29 Tauri IPC commands exposed to frontend |
 
 ### Frontend (React)
 
@@ -55,7 +57,7 @@ This document describes the full infrastructure landscape for the Citinet projec
 | `src/stores/configStore.ts` | Node type + config (Zustand + persist) |
 | `src/stores/appStore.ts` | Phase routing + theme (manual localStorage) |
 | `src/lib/features.ts` | Feature flag system (profile-based per node type) |
-| `src/api/tauri.ts` | Typed wrappers for all 23 Tauri IPC commands |
+| `src/api/tauri.ts` | Typed wrappers for all 29 Tauri IPC commands |
 
 ### Phase Routing
 ```
@@ -70,18 +72,32 @@ wizard → onboarding → dashboard
 ## Hub Tunnel Flow
 
 ```
-Hub operator clicks "Start Tunnel" in dashboard
-    → Tauri calls start_quick_tunnel(port=9090)
+Hub operator configures public access in dashboard:
+
+  Option A — Tailscale Funnel (recommended):
+    → Tailscale installed + logged in
+    → tailscale funnel --bg 9090
+    → returns stable https://name.tailXXXX.ts.net (IPv4 + IPv6)
+    → URL auto-registered with registry.citinet.cloud
+
+  Option B — Cloudflare Quick Tunnel:
     → cloudflared spawns quick tunnel → returns something.trycloudflare.com
-    → background thread auto-registers URL with registry.citinet.cloud:
-        POST /hubs { id, name, slug, tunnel_url, online: true }
-        Authorization: Bearer <REGISTRY_SECRET baked at compile time>
+    → URL auto-registered with registry.citinet.cloud
+    → Note: trycloudflare.com is IPv6-only; use Tailscale or custom domain for IPv4 support
+
+  Option C — Custom Domain (Cloudflare):
+    → API-managed tunnel → permanent {name}.citinet.cloud URL
+    → URL auto-registered with registry.citinet.cloud
+
+All options:
+    → POST /hubs { id, name, slug, tunnel_url, online: true }
+       Authorization: Bearer <REGISTRY_SECRET baked at compile time>
 
 User visits start.citinet.cloud in browser
     → fetches registry, sees hub listed
     → joins hub → navigates to slug.citinet.cloud
     → web portal fetches registry to confirm current tunnel URL
-    → connects to hub API at something.trycloudflare.com
+    → connects to hub API
 ```
 
 ---
@@ -125,11 +141,12 @@ Artifacts in `src-tauri/target/release/bundle/msi/`:
 
 ## Known Limitations
 
-- **IPv6-only tunnels:** `trycloudflare.com` quick tunnels have no IPv4 A records — IPv4-only users cannot reach hub APIs.
+- **Quick Tunnel IPv6-only:** `trycloudflare.com` quick tunnels have no IPv4 A records. Use Tailscale Funnel (recommended) or a custom Cloudflare domain for full IPv4+IPv6 support.
 - **REGISTRY_SECRET baked at compile time:** changing the secret requires a new build and release.
 - **Wildcard `*.citinet.cloud` stays on CF Workers:** Vercel Free does not support wildcard custom domains.
 - **Registry is CF-only:** `registry.citinet.cloud` cannot move off Cloudflare without migrating the KV store.
 - **Registrar transfer lock:** citinet.cloud subject to 60-day ICANN lock from registration (~April 2026).
+- **Windows-only:** Desktop app currently targets Windows only. Hub stack itself (Docker Compose) runs on any OS.
 
 ---
 
